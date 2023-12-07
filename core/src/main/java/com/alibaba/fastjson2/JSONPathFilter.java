@@ -109,6 +109,10 @@ abstract class JSONPathFilter
             super(fieldName, fieldNameNameHash, fieldName2, fieldNameNameHash2, function);
         }
 
+        protected boolean applyNull() {
+            return true;
+        }
+
         @Override
         boolean apply(Object fieldValue) {
             if (function != null) {
@@ -134,6 +138,11 @@ abstract class JSONPathFilter
             super(name, nameHashCode, fieldName2, fieldNameNameHash2, expr);
             this.operator = operator;
             this.value = value;
+        }
+
+        @Override
+        protected boolean applyNull() {
+            return operator == Operator.NE;
         }
 
         @Override
@@ -280,6 +289,10 @@ abstract class JSONPathFilter
             super(name, nameHashCode);
             this.operator = operator;
             this.value = value;
+        }
+
+        protected boolean applyNull() {
+            return operator == Operator.NE;
         }
 
         @Override
@@ -476,6 +489,8 @@ abstract class JSONPathFilter
 
         final Function function;
 
+        boolean includeArray = true;
+
         public NameFilter(String fieldName, long fieldNameNameHash) {
             this.fieldName = fieldName;
             this.fieldNameNameHash = fieldNameNameHash;
@@ -565,7 +580,7 @@ abstract class JSONPathFilter
                 JSONPath.Sequence sequence = (JSONPath.Sequence) object;
                 JSONArray array = new JSONArray();
                 for (Object value : sequence.values) {
-                    if (value instanceof Collection) {
+                    if (includeArray && value instanceof Collection) {
                         for (Object valueItem : ((Collection<?>) value)) {
                             if (apply(context, valueItem)) {
                                 array.add(valueItem);
@@ -588,6 +603,10 @@ abstract class JSONPathFilter
             }
         }
 
+        protected boolean applyNull() {
+            return false;
+        }
+
         @Override
         public final boolean apply(JSONPath.Context context, Object object) {
             if (object == null) {
@@ -599,7 +618,7 @@ abstract class JSONPathFilter
             if (object instanceof Map) {
                 Object fieldValue = fieldName == null ? object : ((Map<?, ?>) object).get(fieldName);
                 if (fieldValue == null) {
-                    return this instanceof NameIsNull;
+                    return applyNull();
                 }
 
                 if (fieldName2 != null) {
@@ -684,6 +703,10 @@ abstract class JSONPathFilter
 
             return false;
         }
+
+        protected void excludeArray() {
+            this.includeArray = false;
+        }
     }
 
     static final class NameStringOpSegment
@@ -703,6 +726,10 @@ abstract class JSONPathFilter
             super(fieldName, fieldNameNameHash, fieldName2, fieldNameNameHash2, expr);
             this.operator = operator;
             this.value = value;
+        }
+
+        protected boolean applyNull() {
+            return operator == Operator.NE;
         }
 
         @Override
@@ -796,6 +823,10 @@ abstract class JSONPathFilter
             super(fieldName, fieldNameNameHash);
             this.values = values;
             this.not = not;
+        }
+
+        protected boolean applyNull() {
+            return not;
         }
 
         @Override
@@ -1016,6 +1047,10 @@ abstract class JSONPathFilter
             this.not = not;
         }
 
+        protected boolean applyNull() {
+            return not;
+        }
+
         @Override
         public boolean apply(Object fieldValue) {
             if (fieldValue instanceof Byte
@@ -1173,6 +1208,10 @@ abstract class JSONPathFilter
             super(fieldName, fieldNameNameHash, fieldName2, fieldNameNameHash2, expr);
             this.values = values;
             this.not = not;
+        }
+
+        protected boolean applyNull() {
+            return not;
         }
 
         @Override

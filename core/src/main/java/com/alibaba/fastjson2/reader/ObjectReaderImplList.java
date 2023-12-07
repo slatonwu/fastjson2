@@ -1,13 +1,12 @@
 package com.alibaba.fastjson2.reader;
 
 import com.alibaba.fastjson2.*;
+import com.alibaba.fastjson2.util.BeanUtils;
 import com.alibaba.fastjson2.util.Fnv;
 import com.alibaba.fastjson2.util.GuavaSupport;
 import com.alibaba.fastjson2.util.TypeUtils;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.Type;
+import java.lang.reflect.*;
 import java.util.*;
 import java.util.function.Function;
 
@@ -42,6 +41,7 @@ public final class ObjectReaderImplList
     Object listSingleton;
     ObjectReader itemObjectReader;
     volatile boolean instanceError;
+    volatile Constructor constructor;
 
     public static ObjectReader of(Type type, Class listClass, long features) {
         if (listClass == type && "".equals(listClass.getSimpleName())) {
@@ -236,7 +236,7 @@ public final class ObjectReaderImplList
         int size = collection.size();
 
         if (size == 0 && (listClass == List.class)) {
-            Collection list = Collections.emptyList();
+            Collection list = new ArrayList();
             if (builder != null) {
                 return builder.apply(list);
             }
@@ -289,8 +289,6 @@ public final class ObjectReaderImplList
 
                     if (itemObjectReader instanceof ObjectReaderImplEnum) {
                         value = ((ObjectReaderImplEnum) itemObjectReader).getEnum((String) value);
-                    } else if (itemObjectReader instanceof ObjectReaderImplEnum2X4) {
-                        value = ((ObjectReaderImplEnum2X4) itemObjectReader).getEnum((String) value);
                     } else {
                         throw new JSONException("can not convert from " + valueClass + " to " + itemType);
                     }
@@ -336,10 +334,18 @@ public final class ObjectReaderImplList
 
         if (instanceType != null) {
             JSONException error = null;
+            if (constructor == null && !BeanUtils.hasPublicDefaultConstructor(instanceType)) {
+                constructor = BeanUtils.getDefaultConstructor(instanceType, false);
+                constructor.setAccessible(true);
+            }
             if (!instanceError) {
                 try {
-                    return instanceType.newInstance();
-                } catch (InstantiationException | IllegalAccessException e) {
+                    if (constructor != null) {
+                        return constructor.newInstance();
+                    } else {
+                        return instanceType.newInstance();
+                    }
+                } catch (InstantiationException | IllegalAccessException | InvocationTargetException | RuntimeException e) {
                     instanceError = true;
                     error = new JSONException("create list error, type " + instanceType);
                 }
@@ -364,15 +370,20 @@ public final class ObjectReaderImplList
 
     @Override
     public Object readJSONBObject(JSONReader jsonReader, Type fieldType, Object fieldName, long features) {
-        ObjectReader objectReader = jsonReader.checkAutoType(this.listClass, 0, features);
         if (jsonReader.nextIfNull()) {
             return null;
         }
 
+        ObjectReader objectReader = jsonReader.checkAutoType(this.listClass, 0, features);
         Function builder = this.builder;
         Class listType = this.instanceType;
         if (objectReader != null) {
-            listType = objectReader.getObjectClass();
+            if (objectReader instanceof ObjectReaderImplList) {
+                listType = ((ObjectReaderImplList) objectReader).instanceType;
+                builder = ((ObjectReaderImplList) objectReader).builder;
+            } else {
+                listType = objectReader.getObjectClass();
+            }
 
             if (listType == CLASS_UNMODIFIABLE_COLLECTION) {
                 listType = ArrayList.class;
@@ -395,6 +406,15 @@ public final class ObjectReaderImplList
             } else if (listType == CLASS_SINGLETON_LIST) {
                 listType = ArrayList.class;
                 builder = (Function<List, List>) ((List list) -> Collections.singletonList(list.get(0)));
+            } else {
+                switch (listType.getTypeName()) {
+                    case "kotlin.collections.EmptySet":
+                    case "kotlin.collections.EmptyList": {
+                        return objectReader.readObject(jsonReader, fieldType, fieldName, features);
+                    }
+                    default:
+                        break;
+                }
             }
         }
 
@@ -518,7 +538,7 @@ public final class ObjectReaderImplList
                     .getObjectReader(itemType);
         }
 
-        if (jsonReader.isJSONB()) {
+        if (jsonReader.jsonb) {
             return readJSONBObject(jsonReader, fieldType, fieldName, 0);
         }
 
@@ -606,8 +626,6 @@ public final class ObjectReaderImplList
             }
 
             list.add(item);
-
-            jsonReader.nextIfComma();
         }
 
         jsonReader.nextIfComma();

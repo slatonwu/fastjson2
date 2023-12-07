@@ -155,30 +155,39 @@ public class ObjectWriterProvider
             }
         }
 
+        ConcurrentMap<Type, ObjectWriter> cache = fieldBased ? this.cacheFieldBased : this.cache;
+
         if (objectWriter == null) {
-            if (fieldBased) {
-                return cacheFieldBased.remove(type);
-            } else {
-                return cache.remove(type);
-            }
+            return cache.remove(type);
         }
 
-        if (fieldBased) {
-            return cacheFieldBased.put(type, objectWriter);
-        } else {
-            return cache.put(type, objectWriter);
-        }
+        return cache.put(type, objectWriter);
     }
 
     public ObjectWriter registerIfAbsent(Type type, ObjectWriter objectWriter) {
+        return registerIfAbsent(type, objectWriter, false);
+    }
+
+    public ObjectWriter registerIfAbsent(Type type, ObjectWriter objectWriter, boolean fieldBased) {
+        ConcurrentMap<Type, ObjectWriter> cache = fieldBased ? this.cacheFieldBased : this.cache;
         return cache.putIfAbsent(type, objectWriter);
     }
 
     public ObjectWriter unregister(Type type) {
+        return unregister(type, false);
+    }
+
+    public ObjectWriter unregister(Type type, boolean fieldBased) {
+        ConcurrentMap<Type, ObjectWriter> cache = fieldBased ? this.cacheFieldBased : this.cache;
         return cache.remove(type);
     }
 
     public boolean unregister(Type type, ObjectWriter objectWriter) {
+        return unregister(type, objectWriter, false);
+    }
+
+    public boolean unregister(Type type, ObjectWriter objectWriter, boolean fieldBased) {
+        ConcurrentMap<Type, ObjectWriter> cache = fieldBased ? this.cacheFieldBased : this.cache;
         return cache.remove(type, objectWriter);
     }
 
@@ -268,6 +277,15 @@ public class ObjectWriterProvider
     }
 
     public ObjectWriter getObjectWriter(Type objectType, Class objectClass, boolean fieldBased) {
+        ObjectWriter objectWriter = fieldBased
+                ? cacheFieldBased.get(objectType)
+                : cache.get(objectType);
+        return objectWriter != null
+                ? objectWriter
+                : getObjectWriterInternal(objectType, objectClass, fieldBased);
+    }
+
+    private ObjectWriter getObjectWriterInternal(Type objectType, Class objectClass, boolean fieldBased) {
         Class superclass = objectClass.getSuperclass();
         if (!objectClass.isEnum()
                 && superclass != null
@@ -276,14 +294,20 @@ public class ObjectWriterProvider
             return getObjectWriter(superclass, superclass, fieldBased);
         }
 
+        final String className = objectClass.getName();
         if (fieldBased) {
             if (superclass != null
                     && superclass != Object.class
-                    && superclass.getName().equals("com.google.protobuf.GeneratedMessageV3")) {
+                    && "com.google.protobuf.GeneratedMessageV3".equals(superclass.getName())) {
                 fieldBased = false;
             }
-            if (objectClass.getName().equals("springfox.documentation.spring.web.json.Json")) {
-                fieldBased = false;
+            switch (className) {
+                case "springfox.documentation.spring.web.json.Json":
+                case "cn.hutool.json.JSONArray":
+                    fieldBased = false;
+                    break;
+                default:
+                    break;
             }
         }
 
@@ -334,25 +358,27 @@ public class ObjectWriterProvider
             }
         }
 
-        if (objectClass != null) {
-            String className = objectClass.getName();
-            switch (className) {
-                case "com.google.common.collect.HashMultimap":
-                case "com.google.common.collect.LinkedListMultimap":
-                case "com.google.common.collect.LinkedHashMultimap":
-                case "com.google.common.collect.ArrayListMultimap":
-                case "com.google.common.collect.TreeMultimap":
-                    objectWriter = GuavaSupport.createAsMapWriter(objectClass);
-                    break;
-                case "com.google.common.collect.AbstractMapBasedMultimap$RandomAccessWrappedList":
-                    objectWriter = ObjectWriterImplList.INSTANCE;
-                    break;
-                case "com.alibaba.fastjson.JSONObject":
-                    objectWriter = ObjectWriterImplMap.of(objectClass);
-                    break;
-                default:
-                    break;
-            }
+        switch (className) {
+            case "com.google.common.collect.HashMultimap":
+            case "com.google.common.collect.LinkedListMultimap":
+            case "com.google.common.collect.LinkedHashMultimap":
+            case "com.google.common.collect.ArrayListMultimap":
+            case "com.google.common.collect.TreeMultimap":
+                objectWriter = GuavaSupport.createAsMapWriter(objectClass);
+                break;
+            case "com.google.common.collect.AbstractMapBasedMultimap$RandomAccessWrappedList":
+                objectWriter = ObjectWriterImplList.INSTANCE;
+                break;
+            case "com.alibaba.fastjson.JSONObject":
+                objectWriter = ObjectWriterImplMap.of(objectClass);
+                break;
+            case "android.net.Uri$OpaqueUri":
+            case "android.net.Uri$HierarchicalUri":
+            case "android.net.Uri$StringUri":
+                objectWriter = ObjectWriterImplToString.INSTANCE;
+                break;
+            default:
+                break;
         }
 
         if (objectWriter == null

@@ -19,12 +19,12 @@ import java.util.concurrent.TimeUnit;
 
 public class EishayFuryWrite {
     static MediaContent object;
-//
-//    static io.fury.ThreadSafeFury fury = io.fury.Fury.builder()
-//            .withLanguage(io.fury.Language.JAVA)
-//            .withReferenceTracking(true)
-//            .disableSecureMode()
-//            .buildThreadSafeFury();
+
+    static io.fury.ThreadSafeFury fury = io.fury.Fury.builder()
+            .withLanguage(io.fury.config.Language.JAVA)
+            .requireClassRegistration(false)
+            .withRefTracking(true)
+            .buildThreadSafeFury();
 
     static JSONWriter.Feature[] features = {
             JSONWriter.Feature.WriteClassName,
@@ -57,10 +57,10 @@ public class EishayFuryWrite {
         bh.consume(bytes);
     }
 
-//    @Benchmark
+    @Benchmark
     public void fury(Blackhole bh) {
-//        byte[] bytes = fury.serialize(object);
-//        bh.consume(bytes);
+        byte[] bytes = fury.serialize(object);
+        bh.consume(bytes);
     }
 
     public static void main(String[] args) throws RunnerException {

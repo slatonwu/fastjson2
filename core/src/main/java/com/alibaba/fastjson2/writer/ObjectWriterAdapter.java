@@ -4,15 +4,15 @@ import com.alibaba.fastjson2.*;
 import com.alibaba.fastjson2.codec.FieldInfo;
 import com.alibaba.fastjson2.filter.*;
 import com.alibaba.fastjson2.util.BeanUtils;
+import com.alibaba.fastjson2.util.DateUtils;
 import com.alibaba.fastjson2.util.Fnv;
 import com.alibaba.fastjson2.util.TypeUtils;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Type;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.*;
 
 import static com.alibaba.fastjson2.JSONB.Constants.BC_TYPED_ANY;
 import static com.alibaba.fastjson2.JSONWriter.Feature.*;
@@ -302,7 +302,8 @@ public class ObjectWriterAdapter<T>
             writeTypeInfo(jsonWriter);
         }
 
-        for (int i = 0; i < fieldWriters.size(); i++) {
+        final int size = fieldWriters.size();
+        for (int i = 0; i < size; i++) {
             FieldWriter fieldWriter = fieldWriters.get(i);
             fieldWriter.write(jsonWriter, object);
         }
@@ -311,8 +312,9 @@ public class ObjectWriterAdapter<T>
     }
 
     public Map<String, Object> toMap(Object object) {
-        JSONObject map = new JSONObject(fieldWriters.size());
-        for (int i = 0; i < fieldWriters.size(); i++) {
+        final int size = fieldWriters.size();
+        JSONObject map = new JSONObject(size, 1F);
+        for (int i = 0; i < size; i++) {
             FieldWriter fieldWriter = fieldWriters.get(i);
             map.put(
                     fieldWriter.fieldName,
@@ -396,7 +398,9 @@ public class ObjectWriterAdapter<T>
         }
 
         JSONWriter.Context context = jsonWriter.context;
-        boolean ignoreNonFieldGetter = ((context.getFeatures() | features) & IgnoreNonFieldGetter.mask) != 0;
+        long features2 = context.getFeatures() | features;
+        boolean refDetect = (features2 & ReferenceDetection.mask) != 0;
+        boolean ignoreNonFieldGetter = (features2 & IgnoreNonFieldGetter.mask) != 0;
 
         BeforeFilter beforeFilter = context.getBeforeFilter();
         if (beforeFilter != null) {
@@ -488,6 +492,10 @@ public class ObjectWriterAdapter<T>
                 continue;
             }
 
+            if (!refDetect && ("this$0".equals(fieldWriterFieldName) || "this$1".equals(fieldWriterFieldName) || "this$2".equals(fieldWriterFieldName))) {
+                continue;
+            }
+
             BeanContext beanContext = null;
 
             // name filter
@@ -497,18 +505,24 @@ public class ObjectWriterAdapter<T>
             }
 
             if (contextNameFilter != null) {
-                beanContext = new BeanContext(
-                        objectClass,
-                        fieldWriter.method,
-                        field,
-                        fieldWriter.fieldName,
-                        fieldWriter.label,
-                        fieldWriter.fieldClass,
-                        fieldWriter.fieldType,
-                        fieldWriter.features,
-                        fieldWriter.format
-                );
-                filteredName = contextNameFilter.process(beanContext, object, filteredName, fieldValue);
+                if (beanContext == null) {
+                    if (field == null && fieldWriter.method != null) {
+                        field = BeanUtils.getDeclaredField(objectClass, fieldWriter.fieldName);
+                    }
+
+                    beanContext = new BeanContext(
+                            objectClass,
+                            fieldWriter.method,
+                            field,
+                            fieldWriter.fieldName,
+                            fieldWriter.label,
+                            fieldWriter.fieldClass,
+                            fieldWriter.fieldType,
+                            fieldWriter.features,
+                            fieldWriter.format
+                    );
+                    filteredName = contextNameFilter.process(beanContext, object, filteredName, fieldValue);
+                }
             }
 
             // property filter
@@ -585,11 +599,26 @@ public class ObjectWriterAdapter<T>
     }
 
     public JSONObject toJSONObject(T object) {
+        return toJSONObject(object, 0);
+    }
+
+    public JSONObject toJSONObject(T object, long features) {
         JSONObject jsonObject = new JSONObject();
 
-        for (int i = 0; i < fieldWriters.size(); i++) {
+        for (int i = 0, size = fieldWriters.size(); i < size; i++) {
             FieldWriter fieldWriter = fieldWriters.get(i);
             Object fieldValue = fieldWriter.getFieldValue(object);
+            String format = fieldWriter.format;
+            Class fieldClass = fieldWriter.fieldClass;
+            if (format != null) {
+                if (fieldClass == Date.class) {
+                    fieldValue = DateUtils.format((Date) fieldValue, format);
+                } else if (fieldClass == LocalDate.class) {
+                    fieldValue = DateUtils.format((LocalDate) fieldValue, format);
+                } else if (fieldClass == LocalDateTime.class) {
+                    fieldValue = DateUtils.format((LocalDateTime) fieldValue, format);
+                }
+            }
 
             long fieldFeatures = fieldWriter.features;
             if ((fieldFeatures & FieldInfo.UNWRAPPED_MASK) != 0) {
@@ -600,16 +629,35 @@ public class ObjectWriterAdapter<T>
 
                 ObjectWriter fieldObjectWriter = fieldWriter.getInitWriter();
                 if (fieldObjectWriter == null) {
-                    fieldObjectWriter = JSONFactory.getDefaultObjectWriterProvider().getObjectWriter(fieldWriter.fieldClass);
+                    fieldObjectWriter = JSONFactory.getDefaultObjectWriterProvider().getObjectWriter(fieldClass);
                 }
                 List<FieldWriter> unwrappedFieldWriters = fieldObjectWriter.getFieldWriters();
-                for (int j = 0; j < unwrappedFieldWriters.size(); j++) {
+                for (int j = 0, unwrappedSize = unwrappedFieldWriters.size(); j < unwrappedSize; j++) {
                     FieldWriter unwrappedFieldWriter = unwrappedFieldWriters.get(j);
                     Object unwrappedFieldValue = unwrappedFieldWriter.getFieldValue(fieldValue);
                     jsonObject.put(unwrappedFieldWriter.fieldName, unwrappedFieldValue);
                 }
                 continue;
             }
+
+            if (fieldValue != null) {
+                String fieldValueClassName = fieldValue.getClass().getName();
+                if (Collection.class.isAssignableFrom(fieldClass)
+                        && (fieldValueClassName.startsWith("java.util.ImmutableCollections$") || fieldValueClassName.startsWith("java.util.Collections$"))
+                ) {
+                    Collection collection = (Collection) fieldValue;
+                    JSONArray array = new JSONArray(collection.size());
+                    for (Object item : collection) {
+                        array.add(JSON.toJSON(item));
+                    }
+                    fieldValue = array;
+                }
+            }
+
+            if (fieldValue == null && ((this.features | features) & WriteNulls.mask) == 0) {
+                continue;
+            }
+
             jsonObject.put(fieldWriter.fieldName, fieldValue);
         }
 

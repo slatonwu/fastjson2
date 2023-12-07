@@ -4,7 +4,6 @@ import com.alibaba.fastjson2.JSONB;
 import com.alibaba.fastjson2.JSONException;
 import com.alibaba.fastjson2.JSONReader;
 import com.alibaba.fastjson2.schema.JSONSchema;
-import com.alibaba.fastjson2.util.UnsafeUtils;
 
 import java.lang.reflect.Type;
 import java.util.function.Function;
@@ -12,7 +11,7 @@ import java.util.function.Supplier;
 
 import static com.alibaba.fastjson2.JSONB.Constants.BC_OBJECT;
 import static com.alibaba.fastjson2.JSONB.Constants.BC_OBJECT_END;
-import static com.alibaba.fastjson2.util.JDKUtils.UNSAFE_SUPPORT;
+import static com.alibaba.fastjson2.util.JDKUtils.UNSAFE;
 
 public class ObjectReader3<T>
         extends ObjectReaderAdapter<T> {
@@ -108,30 +107,20 @@ public class ObjectReader3<T>
             jsonReader.errorOnNoneSerializable(objectClass);
         }
 
-        ObjectReader autoTypeReader = checkAutoType(jsonReader, this.objectClass, this.features | features);
-        if (autoTypeReader != null && autoTypeReader != this && autoTypeReader.getObjectClass() != this.objectClass) {
+        ObjectReader autoTypeReader = checkAutoType(jsonReader, features);
+        if (autoTypeReader != null) {
             return (T) autoTypeReader.readArrayMappingJSONBObject(jsonReader, fieldType, fieldName, features);
         }
 
         T object = creator.get();
 
         int entryCnt = jsonReader.startArray();
-        if (entryCnt > 0) {
+        if (entryCnt == fieldReaders.length) {
             fieldReader0.readFieldValue(jsonReader, object);
-            if (entryCnt > 1) {
-                fieldReader1.readFieldValue(jsonReader, object);
-                if (entryCnt > 2) {
-                    fieldReader2.readFieldValue(jsonReader, object);
-
-                    for (int i = 3; i < entryCnt; ++i) {
-                        jsonReader.skipValue();
-                    }
-                }
-            }
-        }
-
-        for (int i = 3; i < entryCnt; ++i) {
-            jsonReader.skipValue();
+            fieldReader1.readFieldValue(jsonReader, object);
+            fieldReader2.readFieldValue(jsonReader, object);
+        } else {
+            readArrayMappingJSONBObject0(jsonReader, object, entryCnt);
         }
 
         if (buildFunction != null) {
@@ -183,9 +172,9 @@ public class ObjectReader3<T>
         T object;
         if (creator != null) {
             object = creator.get();
-        } else if (UNSAFE_SUPPORT && ((features | jsonReader.getContext().getFeatures()) & JSONReader.Feature.FieldBased.mask) != 0) {
+        } else if (((features | jsonReader.getContext().getFeatures()) & JSONReader.Feature.FieldBased.mask) != 0) {
             try {
-                object = (T) UnsafeUtils.UNSAFE.allocateInstance(objectClass);
+                object = (T) UNSAFE.allocateInstance(objectClass);
             } catch (InstantiationException e) {
                 throw new JSONException(jsonReader.info("create instance error"), e);
             }
@@ -244,7 +233,7 @@ public class ObjectReader3<T>
             jsonReader.errorOnNoneSerializable(objectClass);
         }
 
-        if (jsonReader.isJSONB()) {
+        if (jsonReader.jsonb) {
             return readJSONBObject(jsonReader, fieldType, fieldName, features);
         }
 

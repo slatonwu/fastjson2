@@ -39,6 +39,7 @@ import java.math.BigInteger;
 import java.sql.Timestamp;
 import java.util.*;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import static com.alibaba.fastjson2.util.TypeUtils.toBigDecimal;
 
@@ -1008,7 +1009,7 @@ public class JSONObject
 
         ObjectReaderProvider provider = JSONFactory.getDefaultObjectReaderProvider();
         ObjectReader objectReader = provider.getObjectReader(clazz);
-        return (T) objectReader.createInstance(this, 0L);
+        return (T) objectReader.createInstance(this, JSONReader.Feature.SupportSmartMatch.mask);
     }
 
     public <T> T toJavaObject(Class<T> clazz, ParserConfig config, int features) {
@@ -1034,5 +1035,14 @@ public class JSONObject
             return (T) map;
         }
         return (T) this;
+    }
+
+    static final class Creator
+            implements Supplier<Map> {
+        static final Creator INSTANCE = new Creator();
+        @Override
+        public Map get() {
+            return new JSONObject();
+        }
     }
 }

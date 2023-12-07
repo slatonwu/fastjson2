@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -36,7 +37,7 @@ public interface JSON {
     /**
      * fastjson2 version name
      */
-    String VERSION = "2.0.35";
+    String VERSION = "2.0.44";
 
     /**
      * Parses the json string as a {@link JSONArray} or {@link JSONObject}.
@@ -716,7 +717,10 @@ public interface JSON {
 
         ObjectReaderProvider provider = JSONFactory.getDefaultObjectReaderProvider();
         JSONReader.Context context = new JSONReader.Context(provider);
-        ObjectReader<T> objectReader = provider.getObjectReader(clazz, false);
+        ObjectReader<T> objectReader = provider.getObjectReader(
+                clazz,
+                (defaultReaderFeatures & JSONReader.Feature.FieldBased.mask) != 0
+        );
 
         try (JSONReader reader = JSONReader.of(text, context)) {
             T object = objectReader.readObject(reader, clazz, null, 0);
@@ -840,7 +844,10 @@ public interface JSON {
 
         ObjectReaderProvider provider = JSONFactory.getDefaultObjectReaderProvider();
         JSONReader.Context context = new JSONReader.Context(provider);
-        final ObjectReader<T> objectReader = provider.getObjectReader(type, false);
+        final ObjectReader<T> objectReader = provider.getObjectReader(
+                type,
+                (defaultReaderFeatures & JSONReader.Feature.FieldBased.mask) != 0
+        );
 
         try (JSONReader reader = JSONReader.of(text, context)) {
             T object = objectReader.readObject(reader, type, null, 0);
@@ -1349,7 +1356,10 @@ public interface JSON {
 
         ObjectReaderProvider provider = JSONFactory.getDefaultObjectReaderProvider();
         JSONReader.Context context = new JSONReader.Context(provider);
-        ObjectReader<T> objectReader = provider.getObjectReader(clazz, false);
+        ObjectReader<T> objectReader = provider.getObjectReader(
+                clazz,
+                (JSONFactory.defaultReaderFeatures & JSONReader.Feature.FieldBased.mask) != 0
+        );
 
         try (JSONReader reader = JSONReader.of(bytes, context)) {
             T object = objectReader.readObject(reader, clazz, null, 0);
@@ -2738,7 +2748,11 @@ public interface JSON {
                 if (valueClass == JSONObject.class && context.features == 0) {
                     writer.write((JSONObject) object);
                 } else {
-                    ObjectWriter<?> objectWriter = provider.getObjectWriter(valueClass, valueClass, false);
+                    ObjectWriter<?> objectWriter = provider.getObjectWriter(
+                            valueClass,
+                            valueClass,
+                            (defaultWriterFeatures & JSONWriter.Feature.FieldBased.mask) != 0
+                    );
                     objectWriter.write(writer, object, null, null, 0);
                 }
             }
@@ -2946,7 +2960,11 @@ public interface JSON {
                 if (valueClass == JSONObject.class && writer.context.features == 0) {
                     writer.write((JSONObject) object);
                 } else {
-                    ObjectWriter<?> objectWriter = provider.getObjectWriter(valueClass, valueClass, false);
+                    ObjectWriter<?> objectWriter = provider.getObjectWriter(
+                            valueClass,
+                            valueClass,
+                            (defaultWriterFeatures & JSONWriter.Feature.FieldBased.mask) != 0
+                    );
                     objectWriter.write(writer, object, null, null, 0);
                 }
             }
@@ -3258,6 +3276,26 @@ public interface JSON {
     }
 
     /**
+     * Verify that the json string is legal json text
+     *
+     * @param text the specified string will be validated
+     * @param features the specified features is applied to parsing
+     * @return {@code true} or {@code false}
+     */
+    static boolean isValid(String text, JSONReader.Feature... features) {
+        if (text == null || text.isEmpty()) {
+            return false;
+        }
+
+        try (JSONReader jsonReader = JSONReader.of(text, JSONFactory.createReadContext(features))) {
+            jsonReader.skipValue();
+            return jsonReader.isEnd() && !jsonReader.comma;
+        } catch (JSONException error) {
+            return false;
+        }
+    }
+
+    /**
      * Verify that the json char array is legal json text
      *
      * @param chars the specified array will be validated
@@ -3362,6 +3400,21 @@ public interface JSON {
     }
 
     /**
+     * Verify that the json byte array is legal json text
+     *
+     * @param bytes the specified array will be validated
+     * @param charset the specified charset of the bytes
+     * @return {@code true} or {@code false}
+     */
+    static boolean isValid(byte[] bytes, Charset charset) {
+        if (bytes == null || bytes.length == 0) {
+            return false;
+        }
+
+        return isValid(bytes, 0, bytes.length, charset);
+    }
+
+    /**
      * Verify that the json byte array is a legal JsonArray
      *
      * @param bytes the specified array will be validated
@@ -3389,7 +3442,7 @@ public interface JSON {
      * @param bytes the specified array will be validated
      * @param offset the starting index of array
      * @param length the specified length of array
-     * @param charset the specified charset of the stream
+     * @param charset the specified charset of the bytes
      * @return {@code true} or {@code false}
      */
     static boolean isValid(byte[] bytes, int offset, int length, Charset charset) {
@@ -3503,6 +3556,17 @@ public interface JSON {
     }
 
     /**
+     * Register an {@link ObjectReader} for {@link Type} in default {@link com.alibaba.fastjson2.reader.ObjectReaderProvider}
+     *
+     * @see JSONFactory#getDefaultObjectReaderProvider()
+     * @see com.alibaba.fastjson2.reader.ObjectReaderProvider#register(Type, ObjectReader)
+     * @since 2.0.38
+     */
+    static ObjectReader<?> register(Type type, ObjectReader<?> objectReader, boolean fieldBased) {
+        return JSONFactory.getDefaultObjectReaderProvider().register(type, objectReader, fieldBased);
+    }
+
+    /**
      * Register if absent an {@link ObjectReader} for {@link Type} in default {@link com.alibaba.fastjson2.reader.ObjectReaderProvider}
      *
      * @see JSONFactory#getDefaultObjectReaderProvider()
@@ -3511,6 +3575,17 @@ public interface JSON {
      */
     static ObjectReader<?> registerIfAbsent(Type type, ObjectReader<?> objectReader) {
         return JSONFactory.getDefaultObjectReaderProvider().registerIfAbsent(type, objectReader);
+    }
+
+    /**
+     * Register if absent an {@link ObjectReader} for {@link Type} in default {@link com.alibaba.fastjson2.reader.ObjectReaderProvider}
+     *
+     * @see JSONFactory#getDefaultObjectReaderProvider()
+     * @see com.alibaba.fastjson2.reader.ObjectReaderProvider#registerIfAbsent(Type, ObjectReader)
+     * @since 2.0.38
+     */
+    static ObjectReader<?> registerIfAbsent(Type type, ObjectReader<?> objectReader, boolean fieldBased) {
+        return JSONFactory.getDefaultObjectReaderProvider().registerIfAbsent(type, objectReader, fieldBased);
     }
 
     /**
@@ -3555,6 +3630,17 @@ public interface JSON {
     }
 
     /**
+     * Register an {@link ObjectWriter} for {@link Type} in default {@link  com.alibaba.fastjson2.writer.ObjectWriterProvider}
+     *
+     * @see JSONFactory#getDefaultObjectWriterProvider()
+     * @see com.alibaba.fastjson2.writer.ObjectWriterProvider#register(Type, ObjectWriter)
+     * @since 2.0.38
+     */
+    static ObjectWriter<?> register(Type type, ObjectWriter<?> objectWriter, boolean fieldBased) {
+        return JSONFactory.getDefaultObjectWriterProvider().register(type, objectWriter, fieldBased);
+    }
+
+    /**
      * Register if absent an {@link ObjectWriter} for {@link Type} in default {@link  com.alibaba.fastjson2.writer.ObjectWriterProvider}
      *
      * @see JSONFactory#getDefaultObjectWriterProvider()
@@ -3563,6 +3649,17 @@ public interface JSON {
      */
     static ObjectWriter<?> registerIfAbsent(Type type, ObjectWriter<?> objectWriter) {
         return JSONFactory.getDefaultObjectWriterProvider().registerIfAbsent(type, objectWriter);
+    }
+
+    /**
+     * Register if absent an {@link ObjectWriter} for {@link Type} in default {@link  com.alibaba.fastjson2.writer.ObjectWriterProvider}
+     *
+     * @see JSONFactory#getDefaultObjectWriterProvider()
+     * @see com.alibaba.fastjson2.writer.ObjectWriterProvider#registerIfAbsent(Type, ObjectWriter)
+     * @since 2.0.6
+     */
+    static ObjectWriter<?> registerIfAbsent(Type type, ObjectWriter<?> objectWriter, boolean fieldBased) {
+        return JSONFactory.getDefaultObjectWriterProvider().registerIfAbsent(type, objectWriter, fieldBased);
     }
 
     /**
@@ -3658,6 +3755,26 @@ public interface JSON {
     }
 
     /**
+     * config default reader zoneId
+     *
+     * @param zoneId
+     * @since 2.0.36
+     */
+    static void configReaderZoneId(ZoneId zoneId) {
+        defaultReaderZoneId = zoneId;
+    }
+
+    /**
+     * config default writer zoneId
+     *
+     * @param zoneId
+     * @since 2.0.36
+     */
+    static void configWriterZoneId(ZoneId zoneId) {
+        defaultWriterZoneId = zoneId;
+    }
+
+    /**
      * Enable the specified features in default writer
      *
      * @param features the specified features to be used
@@ -3729,9 +3846,10 @@ public interface JSON {
         if (objectWriter instanceof ObjectWriterAdapter && objectReader instanceof ObjectReaderBean) {
             List<FieldWriter> fieldWriters = objectWriter.getFieldWriters();
 
+            final int size = fieldWriters.size();
             if (objectReader instanceof ObjectReaderNoneDefaultConstructor) {
-                Map<String, Object> map = new HashMap(fieldWriters.size());
-                for (int i = 0; i < fieldWriters.size(); i++) {
+                Map<String, Object> map = new HashMap<>(size, 1F);
+                for (int i = 0; i < size; i++) {
                     FieldWriter fieldWriter = fieldWriters.get(i);
                     Object fieldValue = fieldWriter.getFieldValue(object);
                     map.put(fieldWriter.fieldName, fieldValue);
@@ -3741,7 +3859,7 @@ public interface JSON {
             }
 
             T instance = (T) objectReader.createInstance(featuresValue);
-            for (int i = 0; i < fieldWriters.size(); i++) {
+            for (int i = 0; i < size; i++) {
                 FieldWriter fieldWriter = fieldWriters.get(i);
                 FieldReader fieldReader = objectReader.getFieldReader(fieldWriter.fieldName);
                 if (fieldReader == null) {
@@ -3806,7 +3924,7 @@ public interface JSON {
             List<FieldWriter> fieldWriters = objectWriter.getFieldWriters();
 
             if (objectReader instanceof ObjectReaderNoneDefaultConstructor) {
-                Map<String, Object> map = new HashMap(fieldWriters.size());
+                Map<String, Object> map = new HashMap<>(fieldWriters.size(), 1F);
                 for (int i = 0; i < fieldWriters.size(); i++) {
                     FieldWriter fieldWriter = fieldWriters.get(i);
                     Object fieldValue = fieldWriter.getFieldValue(object);

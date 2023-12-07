@@ -5,10 +5,7 @@ import com.alibaba.fastjson2.annotation.JSONType;
 import com.alibaba.fastjson2.function.*;
 import com.alibaba.fastjson2.reader.*;
 import com.alibaba.fastjson2.schema.JSONSchema;
-import com.alibaba.fastjson2.util.DateUtils;
-import com.alibaba.fastjson2.util.IOUtils;
-import com.alibaba.fastjson2.util.TypeUtils;
-import com.alibaba.fastjson2.util.UnsafeUtils;
+import com.alibaba.fastjson2.util.*;
 import com.alibaba.fastjson2.writer.*;
 import com.alibaba.fastjson2.writer.FieldWriter;
 
@@ -27,7 +24,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.*;
 
 public class ASMUtils {
-    public static final String TYPE_UNSAFE_UTILS = UnsafeUtils.class.getName().replace('.', '/');
+    public static final String TYPE_UNSAFE_UTILS = JDKUtils.class.getName().replace('.', '/');
 
     public static final String TYPE_OBJECT_WRITER_ADAPTER
             = ObjectWriterAdapter.class.getName().replace('.', '/');
@@ -69,6 +66,7 @@ public class ASMUtils {
     public static final String TYPE_OBJECT_WRITER = ObjectWriter.class.getName().replace('.', '/');
     public static final String TYPE_JSON_WRITER = JSONWriter.class.getName().replace('.', '/');
     public static final String TYPE_FIELD_WRITER = FieldWriter.class.getName().replace('.', '/');
+    public static final String TYPE_OBJECT = "java/lang/Object";
 
     public static final String DESC_FIELD_WRITER = 'L' + FieldWriter.class.getName().replace('.', '/') + ';';
     public static final String DESC_FIELD_WRITER_ARRAY = "[" + DESC_FIELD_WRITER;
@@ -89,7 +87,7 @@ public class ASMUtils {
     static {
         paramMapping.put(
                 new MethodInfo(
-                        "com.alibaba.fastjson2.util.ParameterizedTypeImpl",
+                        ParameterizedTypeImpl.class.getName(),
                         "<init>",
                         new String[]{"[Ljava.lang.reflect.Type;", "java.lang.reflect.Type", "java.lang.reflect.Type"}
                 ),
@@ -179,7 +177,7 @@ public class ASMUtils {
                 ObjFloatConsumer.class,
                 ObjDoubleConsumer.class,
                 BiConsumer.class,
-                UnsafeUtils.class,
+                JDKUtils.class,
                 ObjectWriterAdapter.class,
                 ObjectWriter1.class,
                 ObjectWriter2.class,
@@ -380,7 +378,7 @@ public class ASMUtils {
         return paramNames;
     }
 
-    static class MethodInfo {
+    static final class MethodInfo {
         final String className;
         final String methodName;
         final String[] paramTypeNames;

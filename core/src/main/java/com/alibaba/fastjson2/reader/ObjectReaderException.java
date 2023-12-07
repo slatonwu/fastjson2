@@ -154,7 +154,7 @@ final class ObjectReaderException<T>
                 long typeHash = jsonReader.readTypeHashCode();
                 JSONReader.Context context = jsonReader.getContext();
                 ObjectReader reader = autoType(context, typeHash);
-                String typeName = null;
+                String typeName;
                 if (reader == null) {
                     typeName = jsonReader.getString();
                     reader = context.getObjectReaderAutoType(typeName, objectClass, features);
@@ -339,6 +339,15 @@ final class ObjectReaderException<T>
         }
 
         return (T) object;
+    }
+
+    @Override
+    public T createInstance(Map map, long features) {
+        if (map == null) {
+            return null;
+        }
+
+        return readObject(JSONReader.of(JSON.toJSONString(map)), features);
     }
 
     @Override

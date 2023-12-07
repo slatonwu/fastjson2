@@ -3,8 +3,6 @@ package com.alibaba.fastjson2;
 import com.alibaba.fastjson2.util.Fnv;
 import com.alibaba.fastjson2.util.JDKUtils;
 import com.alibaba.fastjson2.util.TypeUtils;
-import com.alibaba.fastjson2.util.UnsafeUtils;
-import sun.misc.Unsafe;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -44,80 +42,91 @@ class JSONReaderASCII
         this.offset = offset + 1;
         this.ch = (char) (ch & 0xFF);
 
-        while (this.ch == '/' && this.offset < bytes.length && bytes[this.offset] == '/') {
-            skipLineComment();
+        if (this.ch == '/') {
+            skipComment();
         }
     }
 
     public final boolean nextIfObjectStart() {
-        final byte[] bytes = this.bytes;
-        int offset = this.offset;
         int ch = this.ch;
         if (ch != '{') {
             return false;
         }
-        comma = false;
 
+        int offset = this.offset;
         if (offset >= end) {
-            this.offset = offset;
             this.ch = EOI;
             return true;
         }
 
-        ch = bytes[offset];
+        byte[] bytes = this.bytes;
+
+        ch = bytes[offset++];
         while (ch == '\0' || (ch <= ' ' && ((1L << ch) & SPACE) != 0)) {
-            offset++;
             if (offset >= end) {
-                this.offset = offset;
                 this.ch = EOI;
+                this.offset = offset;
                 return true;
             }
-            ch = bytes[offset];
+            ch = bytes[offset++];
         }
 
-        this.offset = offset + 1;
         this.ch = (char) (ch & 0xFF);
+        this.offset = offset;
 
         while (this.ch == '/' && this.offset < bytes.length && bytes[this.offset] == '/') {
-            skipLineComment();
+            skipComment();
         }
-
         return true;
     }
 
     public final boolean nextIfObjectEnd() {
-        final byte[] bytes = this.bytes;
-        int offset = this.offset;
         int ch = this.ch;
+        if (ch == ']' || ch == EOI) {
+            throw new JSONException(info("Illegal syntax: `" + (char) ch + '`'));
+        }
+
         if (ch != '}') {
             return false;
         }
-        comma = false;
 
+        int offset = this.offset;
         if (offset >= end) {
-            this.offset = offset;
             this.ch = EOI;
             return true;
         }
 
-        ch = bytes[offset];
+        byte[] bytes = this.bytes;
+
+        ch = bytes[offset++];
         while (ch == '\0' || (ch <= ' ' && ((1L << ch) & SPACE) != 0)) {
-            offset++;
             if (offset >= end) {
-                this.offset = offset;
                 this.ch = EOI;
+                this.offset = offset;
                 return true;
             }
-            ch = bytes[offset];
+            ch = bytes[offset++];
         }
 
-        this.offset = offset + 1;
+        if (ch == ',') {
+            comma = true;
+            ch = bytes[offset++];
+            while (ch == '\0' || (ch <= ' ' && ((1L << ch) & SPACE) != 0)) {
+                if (offset >= end) {
+                    this.ch = EOI;
+                    this.offset = offset;
+                    return true;
+                }
+                ch = bytes[offset++];
+            }
+        }
+
         this.ch = (char) (ch & 0xFF);
+        this.offset = offset;
 
         while (this.ch == '/' && this.offset < bytes.length && bytes[this.offset] == '/') {
-            skipLineComment();
+            skipComment();
         }
-
         return true;
     }
 
@@ -152,7 +161,7 @@ class JSONReaderASCII
         this.ch = (char) (ch & 0xFF);
 
         while (this.ch == '/' && this.offset < bytes.length && bytes[this.offset] == '/') {
-            skipLineComment();
+            skipComment();
         }
 
         return true;
@@ -197,7 +206,7 @@ class JSONReaderASCII
         this.ch = (char) (ch & 0xFF);
 
         while (this.ch == '/' && this.offset < bytes.length && bytes[this.offset] == '/') {
-            skipLineComment();
+            skipComment();
         }
 
         return true;
@@ -205,91 +214,86 @@ class JSONReaderASCII
 
     @Override
     public final boolean nextIfArrayStart() {
-        final byte[] bytes = this.bytes;
-        int offset = this.offset;
         int ch = this.ch;
         if (ch != '[') {
             return false;
         }
 
+        int offset = this.offset;
         if (offset >= end) {
-            this.offset = offset;
             this.ch = EOI;
             return true;
         }
 
-        ch = bytes[offset];
+        byte[] bytes = this.bytes;
+
+        ch = bytes[offset++];
         while (ch == '\0' || (ch <= ' ' && ((1L << ch) & SPACE) != 0)) {
-            offset++;
             if (offset >= end) {
-                this.offset = offset;
                 this.ch = EOI;
+                this.offset = offset;
                 return true;
             }
-            ch = bytes[offset];
+            ch = bytes[offset++];
         }
 
-        this.offset = offset + 1;
         this.ch = (char) (ch & 0xFF);
+        this.offset = offset;
 
         while (this.ch == '/' && this.offset < bytes.length && bytes[this.offset] == '/') {
-            skipLineComment();
+            skipComment();
         }
-
         return true;
     }
 
     @Override
     public final boolean nextIfArrayEnd() {
-        final byte[] bytes = this.bytes;
-        int offset = this.offset;
         int ch = this.ch;
         if (ch == '}' || ch == EOI) {
-            throw new JSONException(info());
+            throw new JSONException(info("Illegal syntax: `" + (char) ch + '`'));
         }
 
         if (ch != ']') {
             return false;
         }
 
+        int offset = this.offset;
         if (offset >= end) {
-            this.offset = offset;
             this.ch = EOI;
             return true;
         }
 
-        ch = bytes[offset];
+        byte[] bytes = this.bytes;
+
+        ch = bytes[offset++];
         while (ch == '\0' || (ch <= ' ' && ((1L << ch) & SPACE) != 0)) {
-            offset++;
             if (offset >= end) {
-                this.offset = offset;
                 this.ch = EOI;
+                this.offset = offset;
                 return true;
             }
-            ch = bytes[offset];
+            ch = bytes[offset++];
         }
 
         if (ch == ',') {
-            this.comma = true;
-            ch = bytes[++offset];
+            comma = true;
+            ch = bytes[offset++];
             while (ch == '\0' || (ch <= ' ' && ((1L << ch) & SPACE) != 0)) {
-                offset++;
                 if (offset >= end) {
-                    this.offset = offset;
                     this.ch = EOI;
+                    this.offset = offset;
                     return true;
                 }
-                ch = bytes[offset];
+                ch = bytes[offset++];
             }
         }
 
-        this.offset = offset + 1;
         this.ch = (char) (ch & 0xFF);
+        this.offset = offset;
 
         while (this.ch == '/' && this.offset < bytes.length && bytes[this.offset] == '/') {
-            skipLineComment();
+            skipComment();
         }
-
         return true;
     }
 
@@ -635,35 +639,17 @@ class JSONReaderASCII
     }
 
     public static int getInt(byte[] bytes, int off) {
-        if (UNSAFE_SUPPORT) {
-            return UnsafeUtils.getInt(
-                    bytes,
-                    (long) Unsafe.ARRAY_BYTE_BASE_OFFSET + off
-            );
-        }
-
-        return ((bytes[off + 3] & 0xFF) << 24)
-                + ((bytes[off + 2] & 0xFF) << 16)
-                + ((bytes[off + 1] & 0xFF) << 8)
-                + (bytes[off] & 0xFF);
+        return UNSAFE.getInt(
+                bytes,
+                ARRAY_BYTE_BASE_OFFSET + off
+        );
     }
 
     public static long getLong(byte[] bytes, int off) {
-        if (UNSAFE_SUPPORT) {
-            return UnsafeUtils.getLong(
-                    bytes,
-                    (long) Unsafe.ARRAY_BYTE_BASE_OFFSET + off
-            );
-        }
-
-        return (((long) bytes[off + 7]) << 56)
-                + ((bytes[off + 6] & 0xFFL) << 48)
-                + ((bytes[off + 5] & 0xFFL) << 40)
-                + ((bytes[off + 4] & 0xFFL) << 32)
-                + ((bytes[off + 3] & 0xFFL) << 24)
-                + ((bytes[off + 2] & 0xFFL) << 16)
-                + ((bytes[off + 1] & 0xFFL) << 8)
-                + (bytes[off] & 0xFFL);
+        return UNSAFE.getLong(
+                bytes,
+                ARRAY_BYTE_BASE_OFFSET + off
+        );
     }
 
     @Override
@@ -1369,7 +1355,8 @@ class JSONReaderASCII
 
             if (nameValue0 != -1) {
                 if (nameValue1 != -1) {
-                    int indexMask = ((int) nameValue1) & (NAME_CACHE2.length - 1);
+                    long nameValue01 = nameValue0 ^ nameValue1;
+                    int indexMask = ((int) (nameValue01 ^ (nameValue01 >>> 32))) & (NAME_CACHE2.length - 1);
                     JSONFactory.NameCacheEntry2 entry = NAME_CACHE2[indexMask];
                     if (entry == null) {
                         char[] chars = new char[length];
@@ -1390,7 +1377,7 @@ class JSONReaderASCII
                         return entry.name;
                     }
                 } else {
-                    int indexMask = ((int) nameValue0) & (NAME_CACHE.length - 1);
+                    int indexMask = ((int) (nameValue0 ^ (nameValue0 >>> 32))) & (NAME_CACHE.length - 1);
                     JSONFactory.NameCacheEntry entry = NAME_CACHE[indexMask];
                     if (entry == null) {
                         char[] chars = new char[length];
@@ -1529,7 +1516,7 @@ class JSONReaderASCII
             _for:
             {
                 int i = 0;
-                byte c0 = 0, c1 = 0, c2 = 0, c3 = 0;
+                byte c0 = 0, c1 = 0, c2 = 0, c3;
 
                 // vector optimize
                 boolean quoted = false;

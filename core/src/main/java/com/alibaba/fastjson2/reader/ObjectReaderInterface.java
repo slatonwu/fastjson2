@@ -47,7 +47,7 @@ public final class ObjectReaderInterface<T>
         boolean objectStart = jsonReader.nextIfObjectStart();
 
         JSONObject jsonObject = new JSONObject();
-        Object object = null;
+        Object object;
         for (int i = 0; ; ++i) {
             if (jsonReader.nextIfObjectEnd()) {
                 break;
@@ -102,7 +102,7 @@ public final class ObjectReaderInterface<T>
 
     @Override
     public T readObject(JSONReader jsonReader, Type fieldType, Object fieldName, long features) {
-        if (jsonReader.isJSONB()) {
+        if (jsonReader.jsonb) {
             return readJSONBObject(jsonReader, fieldType, fieldName, features);
         }
 
@@ -115,7 +115,7 @@ public final class ObjectReaderInterface<T>
             return readArrayMappingObject(jsonReader, fieldType, fieldName, features);
         }
 
-        T object = null;
+        T object;
         JSONObject jsonObject = new JSONObject();
         boolean objectStart = jsonReader.nextIfObjectStart();
         if (!objectStart) {

@@ -10,9 +10,12 @@
 <dependency>
     <groupId>com.alibaba.fastjson2</groupId>
     <artifactId>fastjson2-kotlin</artifactId>
-    <version>2.0.34</version>
+    <version>2.0.43</version>
 </dependency>
 ```
+
+酌情添加标准库(kotlin-stdlib)、反射库(kotlin-reflect)，
+其中若使用数据类(data class)、通过构造函数传入参数则添加反射库。
 
 ```xml
 <dependency>
@@ -32,7 +35,7 @@
 
 ```kotlin
 dependencies {
-    implementation("com.alibaba.fastjson2:fastjson2-kotlin:2.0.34")
+    implementation("com.alibaba.fastjson2:fastjson2-kotlin:2.0.43")
 }
 ```
 

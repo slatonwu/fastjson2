@@ -62,11 +62,12 @@ public final class ObjectReaderImplObject
 
     @Override
     public Object readObject(JSONReader jsonReader, Type fieldType, Object fieldName, long features) {
-        if (jsonReader.isJSONB()) {
+        if (jsonReader.jsonb) {
             return jsonReader.readAny();
         }
 
         JSONReader.Context context = jsonReader.getContext();
+        long contextFeatures = features | context.getFeatures();
 
         String typeName = null;
         if (jsonReader.isObject()) {
@@ -229,9 +230,12 @@ public final class ObjectReaderImplObject
                         throw new JSONException(jsonReader.info());
                 }
 
+                if (value == null && (contextFeatures & JSONReader.Feature.IgnoreNullPropertyValue.mask) != 0) {
+                    continue;
+                }
+
                 Object origin = object.put(name, value);
                 if (origin != null) {
-                    long contextFeatures = features | context.getFeatures();
                     if ((contextFeatures & JSONReader.Feature.DuplicateKeyValueAsArray.mask) != 0) {
                         if (origin instanceof Collection) {
                             ((Collection) origin).add(value);
@@ -251,7 +255,7 @@ public final class ObjectReaderImplObject
 
         char ch = jsonReader.current();
         if (ch == '/') {
-            jsonReader.skipLineComment();
+            jsonReader.skipComment();
             ch = jsonReader.current();
         }
 
@@ -311,7 +315,9 @@ public final class ObjectReaderImplObject
 
         if (type == BC_TYPED_ANY) {
             ObjectReader autoTypeObjectReader = jsonReader.checkAutoType(Object.class, 0, features);
-            return autoTypeObjectReader.readJSONBObject(jsonReader, fieldType, fieldName, features);
+            if (autoTypeObjectReader != null) {
+                return autoTypeObjectReader.readJSONBObject(jsonReader, fieldType, fieldName, features);
+            }
         }
 
         if (type == BC_NULL) {

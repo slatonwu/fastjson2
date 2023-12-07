@@ -5,13 +5,12 @@ import com.alibaba.fastjson2.util.TypeUtils;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static com.alibaba.fastjson2.util.TypeUtils.*;
 
-final class IntegerSchema
+public final class IntegerSchema
         extends JSONSchema {
     final boolean typed;
     final long minimum;
@@ -89,13 +88,13 @@ final class IntegerSchema
 
             if (minimum != Long.MIN_VALUE) {
                 if (exclusiveMinimum ? longValue <= minimum : longValue < minimum) {
-                    return new ValidateResult(false, exclusiveMinimum ? "exclusiveMinimum not match, expect >= %s, but %s" : "minimum not match, expect >= %s, but %s", minimum, value);
+                    return new ValidateResult(false, exclusiveMinimum ? "exclusiveMinimum not match, expect > %s, but %s" : "minimum not match, expect >= %s, but %s", minimum, value);
                 }
             }
 
             if (maximum != Long.MIN_VALUE) {
                 if (exclusiveMaximum ? longValue >= maximum : longValue > maximum) {
-                    return new ValidateResult(false, exclusiveMaximum ? "exclusiveMaximum not match, expect >= %s, but %s" : "maximum not match, expect >= %s, but %s", maximum, value);
+                    return new ValidateResult(false, exclusiveMaximum ? "exclusiveMaximum not match, expect < %s, but %s" : "maximum not match, expect <= %s, but %s", maximum, value);
                 }
             }
 
@@ -172,13 +171,13 @@ final class IntegerSchema
     public ValidateResult validate(long longValue) {
         if (minimum != Long.MIN_VALUE) {
             if (exclusiveMinimum ? longValue <= minimum : longValue < minimum) {
-                return new ValidateResult(false, exclusiveMinimum ? "exclusiveMinimum not match, expect >= %s, but %s" : "minimum not match, expect >= %s, but %s", minimum, longValue);
+                return new ValidateResult(false, exclusiveMinimum ? "exclusiveMinimum not match, expect > %s, but %s" : "minimum not match, expect >= %s, but %s", minimum, longValue);
             }
         }
 
         if (maximum != Long.MIN_VALUE) {
             if (exclusiveMaximum ? longValue >= maximum : longValue > maximum) {
-                return new ValidateResult(false, exclusiveMaximum ? "exclusiveMaximum not match, expect >= %s, but %s" : "maximum not match, expect >= %s, but %s", maximum, longValue);
+                return new ValidateResult(false, exclusiveMaximum ? "exclusiveMaximum not match, expect < %s, but %s" : "maximum not match, expect <= %s, but %s", maximum, longValue);
             }
         }
 
@@ -206,13 +205,13 @@ final class IntegerSchema
         long longValue = value;
         if (minimum != Long.MIN_VALUE) {
             if (exclusiveMinimum ? longValue <= minimum : longValue < minimum) {
-                return new ValidateResult(false, exclusiveMinimum ? "exclusiveMinimum not match, expect >= %s, but %s" : "minimum not match, expect >= %s, but %s", minimum, value);
+                return new ValidateResult(false, exclusiveMinimum ? "exclusiveMinimum not match, expect > %s, but %s" : "minimum not match, expect >= %s, but %s", minimum, value);
             }
         }
 
         if (maximum != Long.MIN_VALUE) {
             if (exclusiveMaximum ? longValue >= maximum : longValue > maximum) {
-                return new ValidateResult(false, exclusiveMaximum ? "exclusiveMaximum not match, expect >= %s, but %s" : "maximum not match, expect >= %s, but %s", maximum, value);
+                return new ValidateResult(false, exclusiveMaximum ? "exclusiveMaximum not match, expect < %s, but %s" : "maximum not match, expect <= %s, but %s", maximum, value);
             }
         }
 
@@ -239,13 +238,13 @@ final class IntegerSchema
         long longValue = value.longValue();
         if (minimum != Long.MIN_VALUE) {
             if (exclusiveMinimum ? longValue <= minimum : longValue < minimum) {
-                return new ValidateResult(false, exclusiveMinimum ? "exclusiveMinimum not match, expect >= %s, but %s" : "minimum not match, expect >= %s, but %s", minimum, value);
+                return new ValidateResult(false, exclusiveMinimum ? "exclusiveMinimum not match, expect > %s, but %s" : "minimum not match, expect >= %s, but %s", minimum, value);
             }
         }
 
         if (maximum != Long.MIN_VALUE) {
             if (exclusiveMaximum ? longValue >= maximum : longValue > maximum) {
-                return new ValidateResult(false, exclusiveMaximum ? "exclusiveMaximum not match, expect >= %s, but %s" : "maximum not match, expect >= %s, but %s", maximum, value);
+                return new ValidateResult(false, exclusiveMaximum ? "exclusiveMaximum not match, expect < %s, but %s" : "maximum not match, expect <= %s, but %s", maximum, value);
             }
         }
 
@@ -265,25 +264,27 @@ final class IntegerSchema
     }
 
     @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        com.alibaba.fastjson2.schema.IntegerSchema that = (com.alibaba.fastjson2.schema.IntegerSchema) o;
-        return Objects.equals(title, that.title)
-                && Objects.equals(description, that.description)
-                && Objects.equals(minimum, that.minimum)
-                && Objects.equals(exclusiveMinimum, that.exclusiveMinimum)
-                && Objects.equals(maximum, that.maximum)
-                && Objects.equals(exclusiveMaximum, that.exclusiveMaximum)
-                && Objects.equals(multipleOf, that.multipleOf);
-    }
+    public JSONObject toJSONObject() {
+        JSONObject object = new JSONObject();
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(title, description, minimum, exclusiveMinimum, maximum, exclusiveMaximum, multipleOf);
+        object.put("type", "integer");
+
+        if (minimum != Long.MIN_VALUE) {
+            object.put(exclusiveMinimum ? "exclusiveMinimum" : "minimum", minimum);
+        }
+
+        if (maximum != Long.MIN_VALUE) {
+            object.put(exclusiveMaximum ? "exclusiveMaximum" : "maximum", maximum);
+        }
+
+        if (multipleOf != 0) {
+            object.put("multipleOf", multipleOf);
+        }
+
+        if (constValue != null) {
+            object.put("const", constValue);
+        }
+
+        return object;
     }
 }

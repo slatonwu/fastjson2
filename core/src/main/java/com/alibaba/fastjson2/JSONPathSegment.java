@@ -11,6 +11,8 @@ import com.alibaba.fastjson2.writer.ObjectWriterAdapter;
 import com.alibaba.fastjson2.writer.ObjectWriterProvider;
 
 import java.lang.reflect.Array;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
@@ -69,7 +71,7 @@ abstract class JSONPathSegment {
                 return;
             }
 
-            if (jsonReader.isJSONB()) {
+            if (jsonReader.jsonb) {
                 JSONArray array = new JSONArray();
 
                 {
@@ -259,7 +261,7 @@ abstract class JSONPathSegment {
                 return;
             }
 
-            if (jsonReader.isJSONB()) {
+            if (jsonReader.jsonb) {
                 JSONArray array = new JSONArray();
 
                 {
@@ -438,9 +440,8 @@ abstract class JSONPathSegment {
 
             if (object instanceof JSONPath.Sequence) {
                 List list = ((JSONPath.Sequence) object).values;
-                for (int i = 0; i < list.size(); i++) {
-                    Object item = list.get(i);
-                    context.value = item;
+                for (int i = 0, size = list.size(); i < size; i++) {
+                    context.value = list.get(i);
                     JSONPath.Context itemContext = new JSONPath.Context(context.path, context, context.current, context.next, context.readerFeatures);
                     eval(itemContext);
                     Object value = itemContext.value;
@@ -513,7 +514,7 @@ abstract class JSONPathSegment {
                 return;
             }
 
-            if (jsonReader.isJSONB()) {
+            if (jsonReader.jsonb) {
                 JSONArray array = new JSONArray();
                 int itemCnt = jsonReader.startArray();
                 for (int i = 0; i < itemCnt; i++) {
@@ -931,7 +932,7 @@ abstract class JSONPathSegment {
                 return;
             }
 
-            if (jsonReader.isJSONB()) {
+            if (jsonReader.jsonb) {
                 List<Object> values = new JSONArray();
                 if (jsonReader.nextIfMatch(BC_OBJECT)) {
                     while (!jsonReader.nextIfMatch(BC_OBJECT_END)) {
@@ -1122,7 +1123,12 @@ abstract class JSONPathSegment {
 
         @Override
         public boolean remove(JSONPath.Context context) {
-            set(context, null);
+            Object object = context.parent == null
+                    ? context.root
+                    : context.parent.value;
+
+            LoopRemove action = new LoopRemove(context);
+            action.accept(object);
             return context.eval = true;
         }
 
@@ -1135,7 +1141,7 @@ abstract class JSONPathSegment {
             List values = new JSONArray();
 
             Consumer action;
-            if (nameHashCode == HASH_STAR || nameHashCode == HASH_EMPTY) {
+            if (shouldRecursive()) {
                 action = new MapRecursive(context, values, 0);
             } else {
                 action = new MapLoop(context, values);
@@ -1172,6 +1178,10 @@ abstract class JSONPathSegment {
 
             LoopCallback action = new LoopCallback(context, callback);
             action.accept(object);
+        }
+
+        protected boolean shouldRecursive() {
+            return nameHashCode == HASH_STAR || nameHashCode == HASH_EMPTY;
         }
 
         class MapLoop
@@ -1235,7 +1245,7 @@ abstract class JSONPathSegment {
             }
         }
 
-        static final class MapRecursive
+        class MapRecursive
                 implements Consumer {
             static final int maxLevel = 2048;
             final JSONPath.Context context;
@@ -1250,16 +1260,28 @@ abstract class JSONPathSegment {
 
             @Override
             public void accept(Object value) {
+                recursive(value, values, level);
+            }
+
+            private void recursive(Object value, List values, int level) {
                 if (level >= maxLevel) {
                     throw new JSONException("level too large");
                 } else {
                     if (value instanceof Map) {
                         Collection collection = ((Map) value).values();
-                        values.addAll(collection);
+                        if (nameHashCode == HASH_STAR) {
+                            values.addAll(collection);
+                        } else if (nameHashCode == HASH_EMPTY) {
+                            values.add(value);
+                        }
                         collection.forEach(this);
                     } else if (value instanceof Collection) {
                         Collection collection = (Collection) value;
-                        values.addAll(collection);
+                        if (nameHashCode == HASH_STAR) {
+                            values.addAll(collection);
+                        } else if (nameHashCode == HASH_EMPTY) {
+                            values.add(value);
+                        }
                         collection.forEach(this);
                     } else if (value != null) {
                         ObjectWriter<?> objectWriter = context.path
@@ -1267,12 +1289,59 @@ abstract class JSONPathSegment {
                                 .getObjectWriter(value.getClass());
                         if (objectWriter instanceof ObjectWriterAdapter) {
                             ObjectWriterAdapter writerAdapter = (ObjectWriterAdapter) objectWriter;
-                            Object temp = Optional.ofNullable(writerAdapter.getFieldWriters()).orElseGet(() -> new ArrayList())
-                                    .stream()
-                                    .filter(Objects::nonNull).map(v -> ((FieldWriter) v).getFieldValue(value))
-                                    .collect(Collectors.toList());
-                            accept(temp);
+                            final List<FieldWriter> fieldWriters = writerAdapter.getFieldWriters();
+                            Object temp = fieldWriters == null || fieldWriters.isEmpty()
+                                    ? new ArrayList<>() // JDK 8+ 只要不 add()，不会初始化内部数组
+                                    : fieldWriters.stream().filter(Objects::nonNull).map(v -> v.getFieldValue(value)).collect(Collectors.toList());
+                            recursive(temp, values, level + 1);
                         }
+                    }
+                }
+            }
+        }
+
+        class LoopRemove {
+            final JSONPath.Context context;
+
+            public LoopRemove(JSONPath.Context context) {
+                this.context = context;
+            }
+
+            public void accept(Object object) {
+                if (object instanceof Map) {
+                    for (Iterator<Map.Entry> it = ((Map) object).entrySet().iterator(); it.hasNext();) {
+                        Map.Entry entry = it.next();
+                        if (name.equals(entry.getKey())) {
+                            it.remove();
+                            context.eval = true;
+                        } else {
+                            Object entryValue = entry.getValue();
+                            if (entryValue != null) {
+                                accept(entryValue);
+                            }
+                        }
+                    }
+                } else if (object instanceof Collection) {
+                    for (Object item : ((List<?>) object)) {
+                        accept(item);
+                    }
+                } else {
+                    Class<?> entryValueClass = object.getClass();
+                    ObjectReader objectReader = JSONFactory.getDefaultObjectReaderProvider().getObjectReader(entryValueClass);
+                    if (objectReader instanceof ObjectReaderBean) {
+                        FieldReader fieldReader = objectReader.getFieldReader(nameHashCode);
+                        if (fieldReader != null) {
+                            fieldReader.accept(object, null);
+                            context.eval = true;
+                            return;
+                        }
+                    }
+
+                    ObjectWriter objectWriter = JSONFactory.getDefaultObjectWriterProvider().getObjectWriter(entryValueClass);
+                    List<FieldWriter> fieldWriters = objectWriter.getFieldWriters();
+                    for (FieldWriter fieldWriter : fieldWriters) {
+                        Object fieldValue = fieldWriter.getFieldValue(object);
+                        accept(fieldValue);
                     }
                 }
             }
@@ -1387,7 +1456,7 @@ abstract class JSONPathSegment {
         }
 
         public void accept(JSONReader jsonReader, JSONPath.Context context, List<Object> values) {
-            if (jsonReader.isJSONB()) {
+            if (jsonReader.jsonb) {
                 if (jsonReader.nextIfMatch(BC_OBJECT)) {
                     while (!jsonReader.nextIfMatch(BC_OBJECT_END)) {
                         long nameHashCode = jsonReader.readFieldNameHashCode();
@@ -1678,6 +1747,21 @@ abstract class JSONPathSegment {
             if (aIsInt && bIsInt) {
                 return a.longValue() + b.longValue();
             }
+
+            boolean aIsDouble = a instanceof Float || a instanceof Double;
+            boolean bIsDouble = b instanceof Float || b instanceof Double;
+            if (aIsDouble || bIsDouble) {
+                return a.doubleValue() + b.doubleValue();
+            }
+
+            if (a instanceof BigDecimal || b instanceof BigDecimal) {
+                return TypeUtils.toBigDecimal(a).add(TypeUtils.toBigDecimal(b));
+            }
+
+            if (a instanceof BigInteger || b instanceof BigInteger) {
+                return TypeUtils.toBigInteger(a).add(TypeUtils.toBigInteger(b));
+            }
+
             throw new JSONException("not support operation");
         }
 

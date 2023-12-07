@@ -82,7 +82,9 @@ public class ObjectWriterBaseModule
             for (int i = 0; i < annotations.length; i++) {
                 Annotation annotation = annotations[i];
                 Class annotationType = annotation.annotationType();
-                jsonType = findAnnotation(annotation, JSONType.class);
+                if (jsonType == null) {
+                    jsonType = findAnnotation(annotation, JSONType.class);
+                }
                 if (jsonType == annotation) {
                     continue;
                 }
@@ -100,37 +102,31 @@ public class ObjectWriterBaseModule
                         jsonType1x = annotation;
                         break;
                     case "com.fasterxml.jackson.annotation.JsonIgnoreProperties":
-                    case "com.alibaba.fastjson2.adapter.jackson.annotation.JsonIgnoreProperties":
                         if (useJacksonAnnotation) {
                             processJacksonJsonIgnoreProperties(beanInfo, annotation);
                         }
                         break;
                     case "com.fasterxml.jackson.annotation.JsonPropertyOrder":
-                    case "com.alibaba.fastjson2.adapter.jackson.annotation.JsonPropertyOrder":
                         if (useJacksonAnnotation) {
                             processJacksonJsonPropertyOrder(beanInfo, annotation);
                         }
                         break;
                     case "com.fasterxml.jackson.annotation.JsonFormat":
-                    case "com.alibaba.fastjson2.adapter.jackson.annotation.JsonFormat":
                         if (useJacksonAnnotation) {
                             processJacksonJsonFormat(beanInfo, annotation);
                         }
                         break;
                     case "com.fasterxml.jackson.annotation.JsonInclude":
-                    case "com.alibaba.fastjson2.adapter.jackson.annotation.JsonInclude":
                         if (useJacksonAnnotation) {
                             processJacksonJsonInclude(beanInfo, annotation);
                         }
                         break;
                     case "com.fasterxml.jackson.annotation.JsonTypeInfo":
-                    case "com.alibaba.fastjson2.adapter.jackson.annotation.JsonTypeInfo":
                         if (useJacksonAnnotation) {
                             processJacksonJsonTypeInfo(beanInfo, annotation);
                         }
                         break;
                     case "com.fasterxml.jackson.databind.annotation.JsonSerialize":
-                    case "com.alibaba.fastjson2.adapter.jackson.databind.annotation.JsonSerialize":
                         if (useJacksonAnnotation) {
                             processJacksonJsonSerialize(beanInfo, annotation);
                             if (beanInfo.serializer != null && Enum.class.isAssignableFrom(objectClass)) {
@@ -139,21 +135,18 @@ public class ObjectWriterBaseModule
                         }
                         break;
                     case "com.fasterxml.jackson.annotation.JsonTypeName":
-                    case "com.alibaba.fastjson2.adapter.jackson.annotation.JsonTypeName":
                         if (useJacksonAnnotation) {
                             processJacksonJsonTypeName(beanInfo, annotation);
                         }
                         break;
                     case "com.fasterxml.jackson.annotation.JsonSubTypes":
-                    case "com.alibaba.fastjson2.adapter.jackson.annotation.JsonSubTypes":
                         if (useJacksonAnnotation) {
                             processJacksonJsonSubTypes(beanInfo, annotation);
                         }
                         break;
                     case "kotlin.Metadata":
                         beanInfo.kotlin = true;
-                        BeanUtils.getKotlinConstructor(objectClass, beanInfo);
-                        beanInfo.createParameterNames = BeanUtils.getKotlinConstructorParameters(objectClass);
+                        KotlinUtils.getConstructor(objectClass, beanInfo);
                         break;
                     default:
                         break;
@@ -176,7 +169,7 @@ public class ObjectWriterBaseModule
                         }
 
                         String annotationTypeName = annotationType.getName();
-                        if (annotationTypeName.equals("com.alibaba.fastjson.annotation.JSONType")) {
+                        if ("com.alibaba.fastjson.annotation.JSONType".equals(annotationTypeName)) {
                             jsonType1x = annotation;
                         }
                     }
@@ -403,7 +396,7 @@ public class ObjectWriterBaseModule
                 String name = m.getName();
                 try {
                     Object result = m.invoke(annotation);
-                    if (name.equals("value")) {
+                    if ("value".equals(name)) {
                         Annotation[] value = (Annotation[]) result;
                         if (value.length != 0) {
                             beanInfo.seeAlso = new Class[value.length];
@@ -451,10 +444,8 @@ public class ObjectWriterBaseModule
 
         private Class processUsing(Class result) {
             String usingName = result.getName();
-            String noneClassName0 = "com.alibaba.fastjson2.adapter.jackson.databind.JsonSerializer$None";
             String noneClassName1 = "com.fasterxml.jackson.databind.JsonSerializer$None";
-            if (!noneClassName0.equals(usingName)
-                    && !noneClassName1.equals(usingName)
+            if (!noneClassName1.equals(usingName)
                     && ObjectWriter.class.isAssignableFrom(result)
             ) {
                 return result;
@@ -472,7 +463,7 @@ public class ObjectWriterBaseModule
                 String name = m.getName();
                 try {
                     Object result = m.invoke(annotation);
-                    if (name.equals("property")) {
+                    if ("property".equals(name)) {
                         String value = (String) result;
                         if (!value.isEmpty()) {
                             beanInfo.typeKey = value;
@@ -491,7 +482,7 @@ public class ObjectWriterBaseModule
                 String name = m.getName();
                 try {
                     Object result = m.invoke(annotation);
-                    if (name.equals("value")) {
+                    if ("value".equals(name)) {
                         String[] value = (String[]) result;
                         if (value.length != 0) {
                             beanInfo.orders = value;
@@ -552,7 +543,7 @@ public class ObjectWriterBaseModule
                             break;
                         case "access": {
                             String access = ((Enum) result).name();
-                            fieldInfo.ignore = access.equals("WRITE_ONLY");
+                            fieldInfo.ignore = "WRITE_ONLY".equals(access);
                             break;
                         }
                         default:
@@ -570,7 +561,7 @@ public class ObjectWriterBaseModule
                 String name = m.getName();
                 try {
                     Object result = m.invoke(annotation);
-                    if (name.equals("value")) {
+                    if ("value".equals(name)) {
                         String[] value = (String[]) result;
                         if (value.length != 0) {
                             beanInfo.ignores = value;
@@ -715,7 +706,7 @@ public class ObjectWriterBaseModule
             Class mixInSource = provider.mixInCache.get(objectClass);
             String methodName = method.getName();
 
-            if (methodName.equals("getTargetSql")) {
+            if ("getTargetSql".equals(methodName)) {
                 if (objectClass != null
                         && objectClass.getName().startsWith("com.baomidou.mybatisplus.")
                 ) {
@@ -1385,17 +1376,42 @@ public class ObjectWriterBaseModule
             }
 
             if (StackTraceElement.class == clazz) {
+                // return createFieldWriter(null, null, fieldName, 0, 0, null, null, fieldClass, fieldClass, null, function);
                 if (STACK_TRACE_ELEMENT_WRITER == null) {
+                    ObjectWriterCreator creator = provider.getCreator();
                     STACK_TRACE_ELEMENT_WRITER = new ObjectWriterAdapter(
                             StackTraceElement.class,
                             null,
                             null,
                             0,
                             Arrays.asList(
-                                    ObjectWriters.fieldWriter("fileName", String.class, StackTraceElement::getFileName),
-                                    ObjectWriters.fieldWriter("lineNumber", StackTraceElement::getLineNumber),
-                                    ObjectWriters.fieldWriter("className", String.class, StackTraceElement::getClassName),
-                                    ObjectWriters.fieldWriter("methodName", String.class, StackTraceElement::getMethodName)
+                                    creator.createFieldWriter(
+                                            "fileName",
+                                            String.class,
+                                            BeanUtils.getDeclaredField(StackTraceElement.class, "fileName"),
+                                            BeanUtils.getMethod(StackTraceElement.class, "getFileName"),
+                                            StackTraceElement::getFileName
+                                    ),
+                                    creator.createFieldWriter(
+                                            "lineNumber",
+                                            BeanUtils.getDeclaredField(StackTraceElement.class, "lineNumber"),
+                                            BeanUtils.getMethod(StackTraceElement.class, "getLineNumber"),
+                                            StackTraceElement::getLineNumber
+                                    ),
+                                    creator.createFieldWriter(
+                                            "className",
+                                            String.class,
+                                            BeanUtils.getDeclaredField(StackTraceElement.class, "declaringClass"),
+                                            BeanUtils.getMethod(StackTraceElement.class, "getClassName"),
+                                            StackTraceElement::getClassName
+                                    ),
+                                    creator.createFieldWriter(
+                                            "methodName",
+                                            String.class,
+                                            BeanUtils.getDeclaredField(StackTraceElement.class, "methodName"),
+                                            BeanUtils.getMethod(StackTraceElement.class, "getMethodName"),
+                                            StackTraceElement::getMethodName
+                                    )
                             )
                     );
                 }
@@ -1472,6 +1488,12 @@ public class ObjectWriterBaseModule
         }
 
         BeanInfo beanInfo = new BeanInfo();
+
+        Class[] interfaces = enumClass.getInterfaces();
+        for (int i = 0; i < interfaces.length; i++) {
+            annotationProcessor.getBeanInfo(beanInfo, interfaces[i]);
+        }
+
         annotationProcessor.getBeanInfo(beanInfo, enumClass);
         if (beanInfo.writeEnumAsJavaBean) {
             return null;

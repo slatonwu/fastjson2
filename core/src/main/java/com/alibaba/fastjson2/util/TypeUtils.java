@@ -1,7 +1,10 @@
 package com.alibaba.fastjson2.util;
 
 import com.alibaba.fastjson2.*;
-import com.alibaba.fastjson2.reader.*;
+import com.alibaba.fastjson2.reader.ObjectReader;
+import com.alibaba.fastjson2.reader.ObjectReaderImplEnum;
+import com.alibaba.fastjson2.reader.ObjectReaderImplInstant;
+import com.alibaba.fastjson2.reader.ObjectReaderProvider;
 import com.alibaba.fastjson2.writer.ObjectWriter;
 import com.alibaba.fastjson2.writer.ObjectWriterPrimitiveImpl;
 
@@ -19,7 +22,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.*;
 
-import static com.alibaba.fastjson2.util.JDKUtils.FIELD_DECIMAL_INT_COMPACT_OFFSET;
+import static com.alibaba.fastjson2.util.JDKUtils.*;
 import static java.lang.invoke.MethodType.methodType;
 
 public class TypeUtils {
@@ -65,6 +68,15 @@ public class TypeUtils {
     public static final BigInteger BIGINT_INT32_MAX = BigInteger.valueOf(Integer.MAX_VALUE);
     public static final BigInteger BIGINT_INT64_MIN = BigInteger.valueOf(Long.MIN_VALUE);
     public static final BigInteger BIGINT_INT64_MAX = BigInteger.valueOf(Long.MAX_VALUE);
+
+    static final long LONG_JAVASCRIPT_LOW = -9007199254740991L;
+    static final long LONG_JAVASCRIPT_HIGH = 9007199254740991L;
+
+    static final BigDecimal DECIMAL_JAVASCRIPT_LOW = BigDecimal.valueOf(LONG_JAVASCRIPT_LOW);
+    static final BigDecimal DECIMAL_JAVASCRIPT_HIGH = BigDecimal.valueOf(LONG_JAVASCRIPT_HIGH);
+
+    static final BigInteger BIGINT_JAVASCRIPT_LOW = BigInteger.valueOf(LONG_JAVASCRIPT_LOW);
+    static final BigInteger BIGINT_JAVASCRIPT_HIGH = BigInteger.valueOf(LONG_JAVASCRIPT_HIGH);
 
     /**
      * All the positive powers of 10 that can be
@@ -1380,24 +1392,28 @@ public class TypeUtils {
     }
 
     public static <T> T cast(Object obj, Type type) {
+        return cast(obj, type, JSONFactory.getDefaultObjectReaderProvider());
+    }
+
+    public static <T> T cast(Object obj, Type type, ObjectReaderProvider provider) {
         if (type instanceof Class) {
-            return (T) cast(obj, (Class) type);
+            return (T) cast(obj, (Class) type, provider);
         }
 
-        ObjectReaderProvider provider = JSONFactory.getDefaultObjectReaderProvider();
-
         if (obj instanceof Collection) {
-            ObjectReader objectReader = provider.getObjectReader(type);
-            return (T) objectReader.createInstance((Collection) obj);
+            return (T) provider.getObjectReader(type)
+                    .createInstance((Collection) obj);
         }
 
         if (obj instanceof Map) {
-            ObjectReader objectReader = provider.getObjectReader(type);
-            return (T) objectReader.createInstance((Map) obj, 0L);
+            return (T) provider.getObjectReader(type)
+                    .createInstance((Map) obj, 0L);
         }
 
-        String json = JSON.toJSONString(obj);
-        return JSON.parseObject(json, type);
+        return JSON.parseObject(
+                JSON.toJSONString(obj),
+                type
+        );
     }
 
     public static <T> T cast(Object obj, Class<T> targetClass) {
@@ -1451,6 +1467,19 @@ public class TypeUtils {
             return (T) typeConvert.apply(obj);
         }
 
+        if (targetClass.isEnum()) {
+            ObjectReader objectReader = JSONFactory.getDefaultObjectReaderProvider().getObjectReader(targetClass);
+            if (objectReader instanceof ObjectReaderImplEnum) {
+                if (obj instanceof Integer) {
+                    int intValue = (Integer) obj;
+                    return (T) ((ObjectReaderImplEnum) objectReader).of(intValue);
+                } else {
+                    JSONReader jsonReader = JSONReader.of(JSON.toJSONString(obj));
+                    return (T) objectReader.readObject(jsonReader, null, null, 0);
+                }
+            }
+        }
+
         if (obj instanceof String) {
             String json = (String) obj;
             if (json.isEmpty() || "null".equals(json)) {
@@ -1472,23 +1501,9 @@ public class TypeUtils {
             return (T) objectReader.readObject(jsonReader, null, null, 0);
         }
 
-        if (targetClass.isEnum()) {
-            if (obj instanceof Integer) {
-                int intValue = (Integer) obj;
-                ObjectReader objectReader = JSONFactory.getDefaultObjectReaderProvider().getObjectReader(targetClass);
-                if (objectReader instanceof ObjectReaderImplEnum) {
-                    return (T) ((ObjectReaderImplEnum) objectReader).of(intValue);
-                }
-
-                if (objectReader instanceof ObjectReaderImplEnum2X4) {
-                    return (T) ((ObjectReaderImplEnum2X4) objectReader).getEnumByOrdinal(intValue);
-                }
-            }
-        }
-
         if (obj instanceof Collection) {
-            ObjectReader objectReader = provider.getObjectReader(targetClass);
-            return (T) objectReader.createInstance((Collection) obj);
+            return (T) provider.getObjectReader(targetClass)
+                    .createInstance((Collection) obj);
         }
 
         String className = targetClass.getName();
@@ -1600,7 +1615,6 @@ public class TypeUtils {
         NAME_MAPPINGS.put(UUID[][].class, "[[UUID");
 
         NAME_MAPPINGS.put(Object.class, "Object");
-        NAME_MAPPINGS.put(Object[].class, "[O");
 
         NAME_MAPPINGS.put(HashMap.class, "M");
         TYPE_MAPPINGS.put("HashMap", HashMap.class);
@@ -1721,7 +1735,7 @@ public class TypeUtils {
         TYPE_MAPPINGS.put("StackTraceElement", StackTraceElement.class);
         TYPE_MAPPINGS.put("[StackTraceElement", StackTraceElement[].class);
 
-        String[] items = new String[]{
+        String[] items = {
                 "java.util.Collections$UnmodifiableMap",
                 "java.util.Collections$UnmodifiableCollection",
         };
@@ -1880,10 +1894,27 @@ public class TypeUtils {
     }
 
     public static boolean isInt32(BigInteger value) {
+        if (FIELD_BIGINTEGER_MAG_OFFSET != -1) {
+            int[] mag = (int[]) UNSAFE.getObject(value, FIELD_BIGINTEGER_MAG_OFFSET);
+            return mag.length == 0
+                    || (mag.length == 1 && (mag[0] >= 0 || (mag[0] == Integer.MIN_VALUE && value.signum() == -1)));
+        }
+
         return value.compareTo(BIGINT_INT32_MIN) >= 0 && value.compareTo(BIGINT_INT32_MAX) <= 0;
     }
 
     public static boolean isInt64(BigInteger value) {
+        if (FIELD_BIGINTEGER_MAG_OFFSET != -1) {
+            int[] mag = (int[]) UNSAFE.getObject(value, FIELD_BIGINTEGER_MAG_OFFSET);
+            if (mag.length <= 1) {
+                return true;
+            }
+
+            if (mag.length == 2) {
+                int mag0 = mag[0];
+                return mag[0] >= 0 || (mag0 == Integer.MIN_VALUE && mag[1] == 0 && value.signum() == -1);
+            }
+        }
         return value.compareTo(BIGINT_INT64_MIN) >= 0 && value.compareTo(BIGINT_INT64_MAX) <= 0;
     }
 
@@ -1902,7 +1933,7 @@ public class TypeUtils {
         int precision = decimal.precision();
         if (precision < 20) {
             if (FIELD_DECIMAL_INT_COMPACT_OFFSET != -1) {
-                long intCompact = UnsafeUtils.getLong(decimal, FIELD_DECIMAL_INT_COMPACT_OFFSET);
+                long intCompact = UNSAFE.getLong(decimal, FIELD_DECIMAL_INT_COMPACT_OFFSET);
                 switch (scale) {
                     case 1:
                         return intCompact % 10 == 0;
@@ -2711,7 +2742,13 @@ public class TypeUtils {
                     }
                     dotIndex = j;
                 } else if (b >= '0' && b <= '9') {
-                    unscaleValue = unscaleValue * 10 + (b - '0');
+                    long r = unscaleValue * 10;
+                    if ((unscaleValue | 10) >>> 31 == 0L || (r / 10 == unscaleValue)) {
+                        unscaleValue = r + (b - '0');
+                    } else {
+                        unscaleValue = -1;
+                        break;
+                    }
                 } else {
                     unscaleValue = -1;
                     break;
@@ -2758,7 +2795,13 @@ public class TypeUtils {
                     }
                     dotIndex = j;
                 } else if (b >= '0' && b <= '9') {
-                    unscaleValue = unscaleValue * 10 + (b - '0');
+                    long r = unscaleValue * 10;
+                    if ((unscaleValue | 10) >>> 31 == 0L || (r / 10 == unscaleValue)) {
+                        unscaleValue = r + (b - '0');
+                    } else {
+                        unscaleValue = -1;
+                        break;
+                    }
                 } else {
                     unscaleValue = -1;
                     break;
@@ -3083,48 +3126,36 @@ public class TypeUtils {
     }
 
     public static int compare(Object a, Object b) {
-        if (a.getClass() == b.getClass()) {
+        final Class typeA = a.getClass(), typeB = b.getClass();
+
+        if (typeA == typeB) {
             return ((Comparable) a).compareTo(b);
         }
 
-        Class typeA = a.getClass();
-        Class typeB = b.getClass();
-
         if (typeA == BigDecimal.class) {
-            if (typeB == Integer.class) {
-                b = new BigDecimal((Integer) b);
-            } else if (typeB == Long.class) {
-                b = new BigDecimal((Long) b);
-            } else if (typeB == Float.class) {
-                b = BigDecimal.valueOf((Float) b);
-            } else if (typeB == Double.class) {
-                b = BigDecimal.valueOf((Double) b);
+            if (typeB == Integer.class || typeB == Long.class) {
+                b = BigDecimal.valueOf(((Number) b).longValue());
+            } else if (typeB == Float.class || typeB == Double.class) {
+                b = BigDecimal.valueOf(((Number) b).doubleValue());
             } else if (typeB == BigInteger.class) {
                 b = new BigDecimal((BigInteger) b);
             }
         } else if (typeA == BigInteger.class) {
-            if (typeB == Integer.class) {
-                b = BigInteger.valueOf((Integer) b);
-            } else if (typeB == Long.class) {
-                b = BigInteger.valueOf((Long) b);
-            } else if (typeB == Float.class) {
-                b = BigDecimal.valueOf((Float) b);
-                a = new BigDecimal((BigInteger) a);
-            } else if (typeB == Double.class) {
-                b = BigDecimal.valueOf((Double) b);
+            if (typeB == Integer.class || typeB == Long.class) {
+                b = BigInteger.valueOf(((Number) b).longValue());
+            } else if (typeB == Float.class || typeB == Double.class) {
+                b = BigDecimal.valueOf(((Number) b).doubleValue());
                 a = new BigDecimal((BigInteger) a);
             } else if (typeB == BigDecimal.class) {
                 a = new BigDecimal((BigInteger) a);
             }
         } else if (typeA == Long.class) {
             if (typeB == Integer.class) {
-                b = new Long((Integer) b);
+                return Long.compare((Long) a, ((Integer) b));
             } else if (typeB == BigDecimal.class) {
-                a = new BigDecimal((Long) a);
-            } else if (typeB == Float.class) {
-                a = new Float((Long) a);
-            } else if (typeB == Double.class) {
-                a = new Double((Long) a);
+                a = BigDecimal.valueOf((Long) a);
+            } else if (typeB == Float.class || typeB == Double.class) {
+                return Double.compare((Long) a, ((Number) b).doubleValue());
             } else if (typeB == BigInteger.class) {
                 a = BigInteger.valueOf((Long) a);
             } else if (typeB == String.class) {
@@ -3133,26 +3164,20 @@ public class TypeUtils {
             }
         } else if (typeA == Integer.class) {
             if (typeB == Long.class) {
-                a = new Long((Integer) a);
+                return Long.compare((Integer) a, ((Long) b));
             } else if (typeB == BigDecimal.class) {
-                a = new BigDecimal((Integer) a);
+                a = BigDecimal.valueOf((Integer) a);
             } else if (typeB == BigInteger.class) {
                 a = BigInteger.valueOf((Integer) a);
-            } else if (typeB == Float.class) {
-                a = new Float((Integer) a);
-            } else if (typeB == Double.class) {
-                a = new Double((Integer) a);
+            } else if (typeB == Float.class || typeB == Double.class) {
+                return Double.compare((Integer) a, ((Number) b).doubleValue());
             } else if (typeB == String.class) {
                 a = BigDecimal.valueOf((Integer) a);
                 b = new BigDecimal((String) b);
             }
         } else if (typeA == Double.class) {
-            if (typeB == Integer.class) {
-                b = new Double((Integer) b);
-            } else if (typeB == Long.class) {
-                b = new Double((Long) b);
-            } else if (typeB == Float.class) {
-                b = new Double((Float) b);
+            if (typeB == Integer.class || typeB == Long.class || typeB == Float.class) {
+                return Double.compare((Double) a, ((Number) b).doubleValue());
             } else if (typeB == BigDecimal.class) {
                 a = BigDecimal.valueOf((Double) a);
             } else if (typeB == String.class) {
@@ -3163,12 +3188,8 @@ public class TypeUtils {
                 b = new BigDecimal((BigInteger) b);
             }
         } else if (typeA == Float.class) {
-            if (typeB == Integer.class) {
-                b = new Float((Integer) b);
-            } else if (typeB == Long.class) {
-                b = new Float((Long) b);
-            } else if (typeB == Double.class) {
-                a = new Double((Float) a);
+            if (typeB == Integer.class || typeB == Long.class || typeB == Double.class) {
+                return Double.compare((Float) a, ((Number) b).doubleValue());
             } else if (typeB == BigDecimal.class) {
                 a = BigDecimal.valueOf((Float) a);
             } else if (typeB == String.class) {
@@ -3180,33 +3201,16 @@ public class TypeUtils {
             }
         } else if (typeA == String.class) {
             String strA = (String) a;
-            if (typeB == Integer.class) {
-                NumberFormatException error = null;
+            if (typeB == Integer.class || typeB == Long.class) {
                 try {
-                    a = Integer.parseInt(strA);
+                    long aVal = Long.parseLong(strA);
+                    return Long.compare(aVal, ((Number) b).longValue());
                 } catch (NumberFormatException ex) {
-                    error = ex;
-                }
-                if (error != null) {
-                    try {
-                        a = Long.parseLong(strA);
-                        b = Long.valueOf((Integer) b);
-                        error = null;
-                    } catch (NumberFormatException ex) {
-                        error = ex;
-                    }
-                }
-                if (error != null) {
                     a = new BigDecimal(strA);
-                    b = BigDecimal.valueOf((Integer) b);
+                    b = BigDecimal.valueOf(((Number) b).longValue());
                 }
-            } else if (typeB == Long.class) {
-                a = new BigDecimal(strA);
-                b = BigDecimal.valueOf((Long) b);
-            } else if (typeB == Float.class) {
-                a = Float.parseFloat(strA);
-            } else if (typeB == Double.class) {
-                a = Double.parseDouble(strA);
+            } else if (typeB == Float.class || typeB == Double.class) {
+                return Double.compare(Double.parseDouble(strA), ((Number) b).doubleValue());
             } else if (typeB == BigInteger.class) {
                 a = new BigInteger(strA);
             } else if (typeB == BigDecimal.class) {
@@ -3280,11 +3284,11 @@ public class TypeUtils {
             case "java.lang.Object":
                 return Object.class;
             case "java.util.Collections$EmptyMap":
-                return Collections.EMPTY_MAP.getClass();
+                return Collections.emptyMap().getClass();
             case "java.util.Collections$EmptyList":
-                return Collections.EMPTY_LIST.getClass();
+                return Collections.emptyList().getClass();
             case "java.util.Collections$EmptySet":
-                return Collections.EMPTY_SET.getClass();
+                return Collections.emptySet().getClass();
             case "java.util.Optional":
                 return Optional.class;
             case "java.util.OptionalInt":
@@ -3796,7 +3800,6 @@ public class TypeUtils {
 
         int end = off + len;
         boolean dot = ch == '.';
-        boolean space = false;
         boolean num = false;
         if (!dot && (ch >= '0' && ch <= '9')) {
             num = true;
@@ -3806,7 +3809,7 @@ public class TypeUtils {
                 } else {
                     return true;
                 }
-            } while (!space && ch >= '0' && ch <= '9');
+            } while (ch >= '0' && ch <= '9');
         }
 
         boolean small = false;
@@ -3825,7 +3828,7 @@ public class TypeUtils {
                     } else {
                         return true;
                     }
-                } while (!space && ch >= '0' && ch <= '9');
+                } while (ch >= '0' && ch <= '9');
             }
         }
 
@@ -4284,5 +4287,17 @@ public class TypeUtils {
         int mask = (1 << eq) - 1;
         int j = i >> eq | (Integer.signum(i & mask)) | sb;
         return signNum * Math.scalb((float) j, Q_MIN_F - 2);
+    }
+
+    public static boolean isJavaScriptSupport(long i) {
+        return i >= LONG_JAVASCRIPT_LOW && i <= LONG_JAVASCRIPT_HIGH;
+    }
+
+    public static boolean isJavaScriptSupport(BigDecimal i) {
+        return i.compareTo(DECIMAL_JAVASCRIPT_LOW) >= 0 && i.compareTo(DECIMAL_JAVASCRIPT_HIGH) <= 0;
+    }
+
+    public static boolean isJavaScriptSupport(BigInteger i) {
+        return i.compareTo(BIGINT_JAVASCRIPT_LOW) >= 0 && i.compareTo(BIGINT_JAVASCRIPT_HIGH) <= 0;
     }
 }

@@ -11,10 +11,9 @@ import com.alibaba.fastjson2.writer.ObjectWriterCreator;
 import com.alibaba.fastjson2.writer.ObjectWriterProvider;
 
 import java.io.InputStream;
-import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.Function;
@@ -40,9 +39,11 @@ public final class JSONFactory {
 
     static long defaultReaderFeatures;
     static String defaultReaderFormat;
+    static ZoneId defaultReaderZoneId;
 
     static long defaultWriterFeatures;
     static String defaultWriterFormat;
+    static ZoneId defaultWriterZoneId;
 
     static Supplier<Map> defaultObjectSupplier;
     static Supplier<List> defaultArraySupplier;
@@ -55,6 +56,8 @@ public final class JSONFactory {
     static final JSONReaderUTF8Creator INCUBATOR_VECTOR_READER_CREATOR_ASCII;
     static final JSONReaderUTF8Creator INCUBATOR_VECTOR_READER_CREATOR_UTF8;
     static final JSONReaderUTF16Creator INCUBATOR_VECTOR_READER_CREATOR_UTF16;
+
+    static int defaultDecimalMaxScale = 2048;
 
     interface JSONReaderUTF8Creator {
         JSONReader create(JSONReader.Context ctx, String str, byte[] bytes, int offset, int length);
@@ -85,11 +88,6 @@ public final class JSONFactory {
             this.value1 = value1;
         }
     }
-
-    static final BigDecimal LOW = BigDecimal.valueOf(-9007199254740991L);
-    static final BigDecimal HIGH = BigDecimal.valueOf(9007199254740991L);
-    static final BigInteger LOW_BIGINT = BigInteger.valueOf(-9007199254740991L);
-    static final BigInteger HIGH_BIGINT = BigInteger.valueOf(9007199254740991L);
 
     static final char[] CA = new char[]{
             'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
@@ -320,17 +318,10 @@ public final class JSONFactory {
     static final ObjectReader<JSONArray> ARRAY_READER = JSONFactory.getDefaultObjectReaderProvider().getObjectReader(JSONArray.class);
     static final ObjectReader<JSONObject> OBJECT_READER = JSONFactory.getDefaultObjectReaderProvider().getObjectReader(JSONObject.class);
 
-    static final char[] UUID_LOOKUP;
     static final byte[] UUID_VALUES;
 
     static {
-        UUID_LOOKUP = new char[256];
         UUID_VALUES = new byte['f' + 1 - '0'];
-        for (int i = 0; i < 256; i++) {
-            int hi = (i >> 4) & 15;
-            int lo = i & 15;
-            UUID_LOOKUP[i] = (char) (((hi < 10 ? '0' + hi : 'a' + hi - 10) << 8) + (lo < 10 ? '0' + lo : 'a' + lo - 10));
-        }
         for (char c = '0'; c <= '9'; c++) {
             UUID_VALUES[c - '0'] = (byte) (c - '0');
         }

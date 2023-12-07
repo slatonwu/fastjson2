@@ -352,7 +352,7 @@ public class JSONWriterTest {
     @Test
     public void writeInt64() {
         JSONWriter jsonWriter = JSONWriter.of();
-        jsonWriter.writeInt64(null);
+        jsonWriter.writeInt64((long[]) null);
         assertEquals("null", jsonWriter.toString());
 
         StringWriter writer = new StringWriter();
@@ -489,7 +489,14 @@ public class JSONWriterTest {
     @Test
     public void writeInt32() {
         JSONWriter jsonWriter = JSONWriter.of();
-        jsonWriter.writeInt32(null);
+        jsonWriter.writeInt32((int[]) null);
+        assertEquals("null", jsonWriter.toString());
+    }
+
+    @Test
+    public void writeInt321() {
+        JSONWriter jsonWriter = JSONWriter.of();
+        jsonWriter.writeInt32((Integer) null);
         assertEquals("null", jsonWriter.toString());
     }
 
@@ -1139,7 +1146,7 @@ public class JSONWriterTest {
 
     @Test
     public void writeBigDecimalAsPlain() {
-        BigDecimal[] decimals = new BigDecimal[] {
+        BigDecimal[] decimals = new BigDecimal[]{
                 new BigDecimal("1"),
                 new BigDecimal("1.1"),
                 new BigDecimal("-1.2"),
@@ -1205,7 +1212,7 @@ public class JSONWriterTest {
 
     static JSONObject parseObjectUF(byte[] jsonbBytes) {
         JSONReader.Context context = new JSONReader.Context(JSONFactory.getDefaultObjectReaderProvider());
-        JSONReader reader = new JSONReaderJSONBUF(
+        JSONReader reader = new JSONReaderJSONB(
                 context,
                 jsonbBytes,
                 0,
@@ -1234,7 +1241,7 @@ public class JSONWriterTest {
         JSONReader.Context context = new JSONReader.Context(JSONFactory.getDefaultObjectReaderProvider());
         context.config(features);
 
-        JSONReader reader = new JSONReaderJSONBUF(
+        JSONReader reader = new JSONReaderJSONB(
                 context,
                 jsonbBytes,
                 0,
@@ -1259,5 +1266,107 @@ public class JSONWriterTest {
     @Test
     public void testPathHashCode() {
         assertTrue(ROOT.hashCode() != 0);
+    }
+
+    @Test
+    public void testListInteger() {
+        int[] values = new int[]{
+                Integer.MIN_VALUE,
+                Integer.MAX_VALUE,
+                Short.MIN_VALUE,
+                Short.MAX_VALUE,
+                Byte.MIN_VALUE,
+                Byte.MAX_VALUE,
+                -99,
+                -49,
+                -39,
+                -29,
+                -19,
+                -9,
+                -1,
+                0,
+                1,
+                9,
+                19,
+                29,
+                39,
+                49,
+                99
+        };
+        List<Integer> list = new ArrayList<>();
+        for (int value : values) {
+            list.add(value);
+        }
+
+        {
+            JSONWriter jsonWriter = JSONWriter.ofUTF8();
+            jsonWriter.writeListInt32(list);
+            String json = jsonWriter.toString();
+            assertArrayEquals(values, JSON.parseObject(json, int[].class));
+        }
+        {
+            JSONWriter jsonWriter = JSONWriter.ofUTF16();
+            jsonWriter.writeListInt32(list);
+            String json = jsonWriter.toString();
+            assertArrayEquals(values, JSON.parseObject(json, int[].class));
+        }
+        {
+            JSONWriter jsonWriter = JSONWriter.ofJSONB();
+            jsonWriter.writeListInt32(list);
+            byte[] jsonbBytes = jsonWriter.getBytes();
+            assertArrayEquals(values, JSONB.parseObject(jsonbBytes, int[].class));
+        }
+    }
+
+    @Test
+    public void testListLong() {
+        long[] values = new long[]{
+                Long.MIN_VALUE,
+                Long.MAX_VALUE,
+                Integer.MIN_VALUE,
+                Integer.MAX_VALUE,
+                Short.MIN_VALUE,
+                Short.MAX_VALUE,
+                Byte.MIN_VALUE,
+                Byte.MAX_VALUE,
+                -99,
+                -49,
+                -39,
+                -29,
+                -19,
+                -9,
+                -1,
+                0,
+                1,
+                9,
+                19,
+                29,
+                39,
+                49,
+                99
+        };
+        List<Long> list = new ArrayList<>();
+        for (long value : values) {
+            list.add(value);
+        }
+
+        {
+            JSONWriter jsonWriter = JSONWriter.ofUTF8();
+            jsonWriter.writeListInt64(list);
+            String json = jsonWriter.toString();
+            assertArrayEquals(values, JSON.parseObject(json, long[].class));
+        }
+        {
+            JSONWriter jsonWriter = JSONWriter.ofUTF16();
+            jsonWriter.writeListInt64(list);
+            String json = jsonWriter.toString();
+            assertArrayEquals(values, JSON.parseObject(json, long[].class));
+        }
+        {
+            JSONWriter jsonWriter = JSONWriter.ofJSONB();
+            jsonWriter.writeListInt64(list);
+            byte[] jsonbBytes = jsonWriter.getBytes();
+            assertArrayEquals(values, JSONB.parseObject(jsonbBytes, long[].class));
+        }
     }
 }

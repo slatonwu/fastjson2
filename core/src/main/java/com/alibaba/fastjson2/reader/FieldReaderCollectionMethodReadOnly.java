@@ -50,7 +50,10 @@ class FieldReaderCollectionMethodReadOnly<T>
             throw new JSONException("set " + fieldName + " error", e);
         }
 
-        if (collection == Collections.EMPTY_LIST || collection == Collections.EMPTY_SET || collection == null) {
+        if (collection == Collections.EMPTY_LIST
+                || collection == Collections.EMPTY_SET
+                || collection == null
+                || collection.equals(value)) {
             if (schema != null) {
                 schema.assertValidate(collection);
             }
@@ -107,7 +110,7 @@ class FieldReaderCollectionMethodReadOnly<T>
                     .getContext()
                     .getObjectReader(fieldType);
         }
-        Object value = jsonReader.isJSONB()
+        Object value = jsonReader.jsonb
                 ? initReader.readJSONBObject(jsonReader, fieldType, fieldName, 0)
                 : initReader.readObject(jsonReader, fieldType, fieldName, 0);
         accept(object, value);

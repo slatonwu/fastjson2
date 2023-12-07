@@ -83,7 +83,7 @@ public class DynamicClassLoader
                 ObjectWriter11.class,
                 ObjectWriter12.class,
                 ObjectWriterAdapter.class,
-                UnsafeUtils.class,
+                JDKUtils.class,
                 TypeUtils.class,
                 DateUtils.class,
                 PropertyNamingStrategy.class,
@@ -185,7 +185,7 @@ public class DynamicClassLoader
             return clazz;
         }
 
-        ClassNotFoundException error = null;
+        ClassNotFoundException error;
         try {
             return super.loadClass(name, resolve);
         } catch (ClassNotFoundException e) {

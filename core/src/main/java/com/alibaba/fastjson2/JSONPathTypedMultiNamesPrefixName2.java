@@ -1,10 +1,7 @@
 package com.alibaba.fastjson2;
 
-import com.alibaba.fastjson2.reader.FieldReader;
-
 import java.lang.reflect.Type;
 import java.time.ZoneId;
-import java.util.Arrays;
 
 public class JSONPathTypedMultiNamesPrefixName2
         extends JSONPathTypedMultiNames {
@@ -40,7 +37,7 @@ public class JSONPathTypedMultiNamesPrefixName2
         }
 
         if (!jsonReader.nextIfObjectStart()) {
-            throw new JSONException(jsonReader.info("illegal input, expect '[', but " + jsonReader.current()));
+            throw error(jsonReader);
         }
 
         while (true) {
@@ -49,11 +46,10 @@ public class JSONPathTypedMultiNamesPrefixName2
             }
 
             if (jsonReader.isEnd()) {
-                throw new JSONException(jsonReader.info("illegal input, expect '[', but " + jsonReader.current()));
+                throw error(jsonReader);
             }
 
-            long nameHashCode = jsonReader.readFieldNameHashCode();
-            boolean match = nameHashCode == prefixNameHash0;
+            boolean match = jsonReader.readFieldNameHashCode() == prefixNameHash0;
             if (!match) {
                 jsonReader.skipValue();
                 continue;
@@ -67,7 +63,7 @@ public class JSONPathTypedMultiNamesPrefixName2
         }
 
         if (!jsonReader.nextIfObjectStart()) {
-            throw new JSONException(jsonReader.info("illegal input, expect '[', but " + jsonReader.current()));
+            throw error(jsonReader);
         }
 
         while (true) {
@@ -76,11 +72,10 @@ public class JSONPathTypedMultiNamesPrefixName2
             }
 
             if (jsonReader.isEnd()) {
-                throw new JSONException(jsonReader.info("illegal input, expect '[', but " + jsonReader.current()));
+                throw error(jsonReader);
             }
 
-            long nameHashCode = jsonReader.readFieldNameHashCode();
-            boolean match = nameHashCode == prefixNameHash1;
+            boolean match = jsonReader.readFieldNameHashCode() == prefixNameHash1;
             if (!match) {
                 jsonReader.skipValue();
                 continue;
@@ -93,38 +88,10 @@ public class JSONPathTypedMultiNamesPrefixName2
             return new Object[paths.length];
         }
 
-        if (!jsonReader.nextIfObjectStart()) {
-            throw new JSONException(jsonReader.info("illegal input, expect '[', but " + jsonReader.current()));
-        }
+        return objectReader.readObject(jsonReader);
+    }
 
-        Object[] values = new Object[paths.length];
-        while (!jsonReader.nextIfObjectEnd()) {
-            if (jsonReader.isEnd()) {
-                throw new JSONException(jsonReader.info("illegal input, expect '[', but " + jsonReader.current()));
-            }
-
-            long nameHashCode = jsonReader.readFieldNameHashCode();
-
-            int m = Arrays.binarySearch(hashCodes, nameHashCode);
-            if (m < 0) {
-                jsonReader.skipValue();
-                continue;
-            }
-
-            int index = this.mapping[m];
-            FieldReader fieldReader = fieldReaders[index];
-            Object fieldValue;
-            try {
-                fieldValue = fieldReader.readFieldValue(jsonReader);
-            } catch (Exception e) {
-                if (!ignoreError(index)) {
-                    throw e;
-                }
-                fieldValue = null;
-            }
-            values[index] = fieldValue;
-        }
-
-        return values;
+    private static JSONException error(JSONReader jsonReader) {
+        return new JSONException(jsonReader.info("illegal input, expect '[', but " + jsonReader.current()));
     }
 }

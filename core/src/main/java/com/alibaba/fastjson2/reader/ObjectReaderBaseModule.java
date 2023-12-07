@@ -19,6 +19,8 @@ import java.math.BigInteger;
 import java.net.*;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.time.*;
 import java.util.*;
@@ -28,7 +30,6 @@ import java.util.function.Function;
 import java.util.regex.Pattern;
 
 import static com.alibaba.fastjson2.util.BeanUtils.*;
-import static com.alibaba.fastjson2.util.JDKUtils.UNSAFE_SUPPORT;
 
 public class ObjectReaderBaseModule
         implements ObjectReaderModule {
@@ -205,7 +206,7 @@ public class ObjectReaderBaseModule
             Class mixInSource = provider.mixInCache.get(objectClass);
             if (mixInSource == null) {
                 String typeName = objectClass.getName();
-                if (typeName.equals("org.apache.commons.lang3.tuple.Triple")) {
+                if ("org.apache.commons.lang3.tuple.Triple".equals(typeName)) {
                     provider.mixIn(objectClass, mixInSource = ApacheLang3Support.TripleMixIn.class);
                 }
             }
@@ -315,8 +316,7 @@ public class ObjectReaderBaseModule
             if (beanInfo.creatorConstructor == null
                     && (beanInfo.readerFeatures & JSONReader.Feature.FieldBased.mask) == 0
                     && beanInfo.kotlin) {
-                BeanUtils.getKotlinConstructor(objectClass, beanInfo);
-                beanInfo.createParameterNames = BeanUtils.getKotlinConstructorParameters(objectClass);
+                KotlinUtils.getConstructor(objectClass, beanInfo);
             }
         }
 
@@ -326,7 +326,7 @@ public class ObjectReaderBaseModule
                 String name = m.getName();
                 try {
                     Object result = m.invoke(annotation);
-                    if (name.equals("value")) {
+                    if ("value".equals(name)) {
                         Object[] value = (Object[]) result;
                         if (value.length != 0) {
                             beanInfo.seeAlso = new Class[value.length];
@@ -349,7 +349,7 @@ public class ObjectReaderBaseModule
                 String name = m.getName();
                 try {
                     Object result = m.invoke(annotation);
-                    if (name.equals("using")) {
+                    if ("using".equals(name)) {
                         Class using = processUsing((Class) result);
                         if (using != null) {
                             beanInfo.deserializer = using;
@@ -367,7 +367,7 @@ public class ObjectReaderBaseModule
                 String name = m.getName();
                 try {
                     Object result = m.invoke(annotation);
-                    if (name.equals("property")) {
+                    if ("property".equals(name)) {
                         String value = (String) result;
                         if (!value.isEmpty()) {
                             beanInfo.typeKey = value;
@@ -520,7 +520,7 @@ public class ObjectReaderBaseModule
                                     Class<? extends Annotation> builderAnnotationClass = builderAnnotation.annotationType();
                                     String builderAnnotationName = builderAnnotationClass.getName();
 
-                                    if (builderAnnotationName.equals("com.alibaba.fastjson.annotation.JSONPOJOBuilder")) {
+                                    if ("com.alibaba.fastjson.annotation.JSONPOJOBuilder".equals(builderAnnotationName)) {
                                         getBeanInfo1xJSONPOJOBuilder(beanInfo, builderClass, builderAnnotation, builderAnnotationClass);
                                     } else {
                                         JSONBuilder jsonBuilder = findAnnotation(builderClass, JSONBuilder.class);
@@ -572,7 +572,7 @@ public class ObjectReaderBaseModule
             Class mixInSource = provider.mixInCache.get(objectClass);
             if (mixInSource == null) {
                 String typeName = objectClass.getName();
-                if (typeName.equals("org.apache.commons.lang3.tuple.Triple")) {
+                if ("org.apache.commons.lang3.tuple.Triple".equals(typeName)) {
                     provider.mixIn(objectClass, mixInSource = ApacheLang3Support.TripleMixIn.class);
                 }
             }
@@ -592,7 +592,7 @@ public class ObjectReaderBaseModule
                     String name = m.getName();
                     try {
                         Object result = m.invoke(annotation);
-                        if (name.equals("typeName")) {
+                        if ("typeName".equals(name)) {
                             String typeName = (String) result;
                             if (!typeName.isEmpty()) {
                                 beanInfo.typeName = typeName;
@@ -1003,7 +1003,7 @@ public class ObjectReaderBaseModule
                         }
                         case "access": {
                             String access = ((Enum) result).name();
-                            fieldInfo.ignore = access.equals("READ_ONLY");
+                            fieldInfo.ignore = "READ_ONLY".equals(access);
                             break;
                         }
                         case "required":
@@ -1027,7 +1027,7 @@ public class ObjectReaderBaseModule
                 String name = m.getName();
                 try {
                     Object result = m.invoke(annotation);
-                    if (name.equals("value")) {
+                    if ("value".equals(name)) {
                         String[] values = (String[]) result;
                         if (values.length != 0) {
                             fieldInfo.alternateNames = values;
@@ -1289,7 +1289,7 @@ public class ObjectReaderBaseModule
                     creatorMethod = true;
                     BeanUtils.annotationMethods(annotationType, m1 -> {
                         try {
-                            if (m1.getName().equals("parameterNames")) {
+                            if ("parameterNames".equals(m1.getName())) {
                                 String[] createParameterNames = (String[]) m1.invoke(annotation);
                                 if (createParameterNames.length != 0) {
                                     beanInfo.createParameterNames = createParameterNames;
@@ -1331,7 +1331,7 @@ public class ObjectReaderBaseModule
 
         String methodName = method.getName();
         if (objectClass.isEnum()) {
-            if (methodName.equals("values")) {
+            if ("values".equals(methodName)) {
                 return;
             }
         }
@@ -1352,7 +1352,7 @@ public class ObjectReaderBaseModule
                     creatorMethod = true;
                     BeanUtils.annotationMethods(annotationType, m1 -> {
                         try {
-                            if (m1.getName().equals("parameterNames")) {
+                            if ("parameterNames".equals(m1.getName())) {
                                 String[] createParameterNames = (String[]) m1.invoke(annotation);
                                 if (createParameterNames.length != 0) {
                                     beanInfo.createParameterNames = createParameterNames;
@@ -1368,7 +1368,7 @@ public class ObjectReaderBaseModule
                         creatorMethod = true;
                         BeanUtils.annotationMethods(annotationType, m1 -> {
                             try {
-                                if (m1.getName().equals("parameterNames")) {
+                                if ("parameterNames".equals(m1.getName())) {
                                     String[] createParameterNames = (String[]) m1.invoke(annotation);
                                     if (createParameterNames.length != 0) {
                                         beanInfo.createParameterNames = createParameterNames;
@@ -1525,6 +1525,13 @@ public class ObjectReaderBaseModule
             return new ObjectReaderImplFromString<>(File.class, File::new);
         }
 
+        if (type == Path.class) {
+            return new ObjectReaderImplFromString<>(
+                    Path.class,
+                    Paths::get
+            );
+        }
+
         if (type == URL.class) {
             return new ObjectReaderImplFromString<>(
                     URL.class,
@@ -1591,8 +1598,6 @@ public class ObjectReaderBaseModule
             case "org.springframework.security.web.authentication.WebAuthenticationDetails":
                 internalMixin = "org.springframework.security.web.jackson2.WebAuthenticationDetailsMixin";
                 break;
-            default:
-                break;
         }
 
         if (internalMixin != null) {
@@ -1600,7 +1605,7 @@ public class ObjectReaderBaseModule
             if (mixin == null) {
                 mixin = TypeUtils.loadClass(internalMixin);
                 if (mixin == null) {
-                    if (internalMixin.equals("org.springframework.security.jackson2.SimpleGrantedAuthorityMixin")) {
+                    if ("org.springframework.security.jackson2.SimpleGrantedAuthorityMixin".equals(internalMixin)) {
                         mixin = TypeUtils.loadClass("com.alibaba.fastjson2.internal.mixin.spring.SimpleGrantedAuthorityMixin");
                     }
                 }
@@ -1658,6 +1663,14 @@ public class ObjectReaderBaseModule
 
         if (type == OffsetDateTime.class) {
             return ObjectReaderImplOffsetDateTime.INSTANCE;
+        }
+
+        if (type == OffsetTime.class) {
+            return ObjectReaderImplOffsetTime.INSTANCE;
+        }
+
+        if (type == ZoneOffset.class) {
+            return new ObjectReaderImplFromString<>(ZoneOffset.class, ZoneOffset::of);
         }
 
         if (type == Instant.class) {
@@ -1951,12 +1964,14 @@ public class ObjectReaderBaseModule
                     return typedMap((Class) rawType, ConcurrentSkipListMap.class, actualTypeParam0, actualTypeParam1);
                 }
 
-                if (rawType == LinkedHashMap.class || rawType == TreeMap.class) {
+                if (rawType == LinkedHashMap.class
+                        || rawType == TreeMap.class
+                        || rawType == Hashtable.class) {
                     return typedMap((Class) rawType, (Class) rawType, actualTypeParam0, actualTypeParam1);
                 }
 
                 if (rawType == Map.Entry.class) {
-                    return new ObjectReaderImplMapEntry(actualTypeArguments[0], actualTypeArguments[1]);
+                    return new ObjectReaderImplMapEntry(actualTypeParam0, actualTypeParam1);
                 }
 
                 switch (rawType.getTypeName()) {
@@ -1970,12 +1985,8 @@ public class ObjectReaderBaseModule
                     case "org.apache.commons.lang3.tuple.Pair":
                     case "org.apache.commons.lang3.tuple.ImmutablePair":
                         return new ApacheLang3Support.PairReader((Class) rawType, actualTypeParam0, actualTypeParam1);
-                    default:
-                        break;
                 }
-            }
-
-            if (actualTypeArguments.length == 1) {
+            } else if (actualTypeArguments.length == 1) {
                 Type itemType = actualTypeArguments[0];
                 Class itemClass = TypeUtils.getMapping(itemType);
 
@@ -2049,8 +2060,6 @@ public class ObjectReaderBaseModule
                     case "com.google.common.collect.ImmutableSet":
                     case "com.google.common.collect.SingletonImmutableSet":
                         return ObjectReaderImplList.of(type, null, 0);
-                    default:
-                        break;
                 }
 
                 if (rawType == Optional.class) {
@@ -2129,10 +2138,7 @@ public class ObjectReaderBaseModule
             case "java.lang.RuntimeException":
             case "java.io.IOException":
             case "java.io.UncheckedIOException":
-                if (!UNSAFE_SUPPORT) {
-                    return new ObjectReaderException((Class) type);
-                }
-                break;
+                return new ObjectReaderException((Class) type);
             case "java.nio.HeapByteBuffer":
             case "java.nio.ByteBuffer":
                 return new ObjectReaderImplInt8ValueArray(ByteBuffer::wrap, null);

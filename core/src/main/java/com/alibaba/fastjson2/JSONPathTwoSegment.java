@@ -32,6 +32,11 @@ class JSONPathTwoSegment
             extractSupport = false;
         }
         this.extractSupport = extractSupport;
+
+        if (first instanceof JSONPathSegment.CycleNameSegment && ((JSONPathSegment.CycleNameSegment) first).shouldRecursive()
+                && second instanceof JSONPathFilter.NameFilter) {
+            ((JSONPathFilter.NameFilter) second).excludeArray();
+        }
     }
 
     @Override
@@ -105,9 +110,17 @@ class JSONPathTwoSegment
         if (context0.value == null) {
             Object emptyValue;
             if (second instanceof JSONPathSegmentIndex) {
-                emptyValue = new JSONArray();
+                if (readerContext != null && readerContext.arraySupplier != null) {
+                    emptyValue = readerContext.arraySupplier.get();
+                } else {
+                    emptyValue = new JSONArray();
+                }
             } else if (second instanceof JSONPathSegmentName) {
-                emptyValue = new JSONObject();
+                if (readerContext != null && readerContext.objectSupplier != null) {
+                    emptyValue = readerContext.objectSupplier.get();
+                } else {
+                    emptyValue = new JSONObject();
+                }
             } else {
                 return;
             }

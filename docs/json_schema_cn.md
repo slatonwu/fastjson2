@@ -20,14 +20,14 @@ JSONSchemaBenchmark.networknt  thrpt    5   2.337 ± 0.007  ops/ms
 @Test
 public void test() {
     // 定义必须包含longitude和latitude两个属性，其中longitude的取值范围是[-180 ~ 180]，latitude的取值范围是[-90, 90]
-    JSONSchema schema = JSONSchema.of("{\n" +
-            "  \"type\": \"object\",\n" +
-            "  \"properties\": {\n" +
-            "    \"longitude\": { \"type\": \"number\", \"minimum\":-180, \"maximum\":180},\n" +
-            "    \"latitude\": { \"type\": \"number\", \"minimum\":-90, \"maximum\":90},\n" +
-            "  },\n" +
-            "  \"required\": [\"longitude\", \"latitude\"]\n" +
-            "}");
+    JSONSchema schema = JSONSchema.of(JSON.parseObject("{" +
+        "  \"type\": \"object\"," +
+        "  \"properties\": {" +
+        "    \"longitude\": { \"type\": \"number\", \"minimum\":-180, \"maximum\":180}," +
+        "    \"latitude\": { \"type\": \"number\", \"minimum\":-90, \"maximum\":90}," +
+        "  }," +
+        "  \"required\": [\"longitude\", \"latitude\"]" +
+        "}"));
 
     // 校验JSONObject对象，校验通过
     assertTrue(
@@ -137,5 +137,40 @@ public void test2() {
             JSONObject.of("longitude", 220.1552, "latitude", 30.2741)
                     .to(Point2.class)
     );
+}
+```
+
+# 4. 通过类型构造JSONSchema
+在后端和前端交互时，需要将java类型转换成JSONSchema返回给客户端。
+```java
+@Test
+public void test() {
+    JSONSchema schema = JSONSchema.of(Bean.class);
+    String string = schema.toString();
+    assertEquals(
+            "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\"},\"name\":{\"type\":\"string\"}},\"required\":[\"id\"]}",
+            string
+    );
+    JSONSchema pased = JSONSchema.of(JSON.parseObject(string));
+    assertTrue(Differ.diff(schema, pased));
+
+    Bean bean = new Bean();
+    JSONSchema valueSchema = JSONSchema.ofValue(bean);
+    assertTrue(Differ.diff(schema, valueSchema));
+}
+
+public static class Bean {
+    public int id;
+    public String name;
+}
+```
+
+# 5. 通过值对象构造JSONSchema
+```java
+@Test
+public void fromValueMap() {
+    Map map = new HashMap();
+    map.put("id", 123);
+    assertEquals("{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\"}}}", JSONSchema.ofValue(map).toString());
 }
 ```

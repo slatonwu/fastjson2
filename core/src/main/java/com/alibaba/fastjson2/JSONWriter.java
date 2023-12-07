@@ -23,9 +23,11 @@ import java.util.*;
 import static com.alibaba.fastjson2.JSONFactory.*;
 import static com.alibaba.fastjson2.JSONWriter.Feature.*;
 import static com.alibaba.fastjson2.util.JDKUtils.*;
+import static com.alibaba.fastjson2.util.TypeUtils.isJavaScriptSupport;
 
 public abstract class JSONWriter
         implements Closeable {
+    static final long WRITE_ARRAY_NULL_MASK = NullAsDefaultValue.mask | WriteNullListAsEmpty.mask;
     static final char[] DIGITS = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
 
     public final Context context;
@@ -61,7 +63,7 @@ public abstract class JSONWriter
         this.jsonb = jsonb;
         this.utf8 = !jsonb && charset == StandardCharsets.UTF_8;
         this.utf16 = !jsonb && charset == StandardCharsets.UTF_16;
-        this.useSingleQuote = !jsonb && (context.features & Feature.UseSingleQuotes.mask) != 0;
+        this.useSingleQuote = !jsonb && (context.features & UseSingleQuotes.mask) != 0;
 
         quote = useSingleQuote ? '\'' : '"';
 
@@ -83,11 +85,11 @@ public abstract class JSONWriter
     }
 
     public final boolean isIgnoreNoneSerializable() {
-        return (context.features & Feature.IgnoreNoneSerializable.mask) != 0;
+        return (context.features & IgnoreNoneSerializable.mask) != 0;
     }
 
     public final boolean isIgnoreNoneSerializable(Object object) {
-        return (context.features & Feature.IgnoreNoneSerializable.mask) != 0
+        return (context.features & IgnoreNoneSerializable.mask) != 0
                 && object != null
                 && !Serializable.class.isAssignableFrom(object.getClass());
     }
@@ -118,7 +120,7 @@ public abstract class JSONWriter
     }
 
     public final String setPath(String name, Object object) {
-        if ((context.features & Feature.ReferenceDetection.mask) == 0
+        if ((context.features & ReferenceDetection.mask) == 0
                 || object == Collections.EMPTY_LIST
                 || object == Collections.EMPTY_SET
         ) {
@@ -144,7 +146,7 @@ public abstract class JSONWriter
     }
 
     public final String setPath(FieldWriter fieldWriter, Object object) {
-        if ((context.features & Feature.ReferenceDetection.mask) == 0
+        if ((context.features & ReferenceDetection.mask) == 0
                 || object == Collections.EMPTY_LIST
                 || object == Collections.EMPTY_SET
         ) {
@@ -171,8 +173,18 @@ public abstract class JSONWriter
         return previous.toString();
     }
 
+    public final boolean writeReference(int index, Object object) {
+        String refPath = setPath(index, object);
+        if (refPath != null) {
+            writeReference(refPath);
+            popPath(object);
+            return true;
+        }
+        return false;
+    }
+
     public final String setPath(int index, Object object) {
-        if ((context.features & Feature.ReferenceDetection.mask) == 0
+        if ((context.features & ReferenceDetection.mask) == 0
                 || object == Collections.EMPTY_LIST
                 || object == Collections.EMPTY_SET
         ) {
@@ -203,7 +215,7 @@ public abstract class JSONWriter
 
     public final void popPath(Object object) {
         if (this.path == null
-                || (context.features & Feature.ReferenceDetection.mask) == 0
+                || (context.features & ReferenceDetection.mask) == 0
                 || object == Collections.EMPTY_LIST
                 || object == Collections.EMPTY_SET
         ) {
@@ -226,11 +238,11 @@ public abstract class JSONWriter
     }
 
     public final boolean isWriteNulls() {
-        return (context.features & Feature.WriteNulls.mask) != 0;
+        return (context.features & WriteNulls.mask) != 0;
     }
 
     public final boolean isRefDetect() {
-        return (context.features & Feature.ReferenceDetection.mask) != 0;
+        return (context.features & ReferenceDetection.mask) != 0;
     }
 
     public final boolean isUseSingleQuotes() {
@@ -238,7 +250,7 @@ public abstract class JSONWriter
     }
 
     public final boolean isRefDetect(Object object) {
-        return (context.features & Feature.ReferenceDetection.mask) != 0
+        return (context.features & ReferenceDetection.mask) != 0
                 && object != null
                 && !ObjectWriterProvider.isNotReferenceDetect(object.getClass());
     }
@@ -252,7 +264,7 @@ public abstract class JSONWriter
     }
 
     public final boolean isBeanToArray() {
-        return (context.features & Feature.BeanToArray.mask) != 0;
+        return (context.features & BeanToArray.mask) != 0;
     }
 
     public final boolean isEnabled(Feature feature) {
@@ -272,12 +284,12 @@ public abstract class JSONWriter
     }
 
     public final boolean isIgnoreErrorGetter() {
-        return (context.features & Feature.IgnoreErrorGetter.mask) != 0;
+        return (context.features & IgnoreErrorGetter.mask) != 0;
     }
 
     public final boolean isWriteTypeInfo(Object object, Class fieldClass) {
         long features = context.features;
-        if ((features & Feature.WriteClassName.mask) == 0) {
+        if ((features & WriteClassName.mask) == 0) {
             return false;
         }
 
@@ -290,19 +302,19 @@ public abstract class JSONWriter
             return false;
         }
 
-        if ((features & Feature.NotWriteHashMapArrayListClassName.mask) != 0) {
+        if ((features & NotWriteHashMapArrayListClassName.mask) != 0) {
             if (objectClass == HashMap.class || objectClass == ArrayList.class) {
                 return false;
             }
         }
 
-        return (features & Feature.NotWriteRootClassName.mask) == 0
+        return (features & NotWriteRootClassName.mask) == 0
                 || object != this.rootObject;
     }
 
     public final boolean isWriteTypeInfo(Object object, Type fieldType) {
         long features = context.features;
-        if ((features & Feature.WriteClassName.mask) == 0
+        if ((features & WriteClassName.mask) == 0
                 || object == null
         ) {
             return false;
@@ -326,13 +338,13 @@ public abstract class JSONWriter
             return false;
         }
 
-        if ((features & Feature.NotWriteHashMapArrayListClassName.mask) != 0) {
+        if ((features & NotWriteHashMapArrayListClassName.mask) != 0) {
             if (objectClass == HashMap.class || objectClass == ArrayList.class) {
                 return false;
             }
         }
 
-        return (features & Feature.NotWriteRootClassName.mask) == 0
+        return (features & NotWriteRootClassName.mask) == 0
                 || object != this.rootObject;
     }
 
@@ -349,11 +361,11 @@ public abstract class JSONWriter
 
     public final boolean isWriteTypeInfo(Object object) {
         long features = context.features;
-        if ((features & Feature.WriteClassName.mask) == 0) {
+        if ((features & WriteClassName.mask) == 0) {
             return false;
         }
 
-        if ((features & Feature.NotWriteHashMapArrayListClassName.mask) != 0
+        if ((features & NotWriteHashMapArrayListClassName.mask) != 0
                 && object != null) {
             Class objectClass = object.getClass();
             if (objectClass == HashMap.class || objectClass == ArrayList.class) {
@@ -361,14 +373,14 @@ public abstract class JSONWriter
             }
         }
 
-        return (features & Feature.NotWriteRootClassName.mask) == 0
+        return (features & NotWriteRootClassName.mask) == 0
                 || object != this.rootObject;
     }
 
     public final boolean isWriteTypeInfo(Object object, Type fieldType, long features) {
         features |= context.features;
 
-        if ((features & Feature.WriteClassName.mask) == 0) {
+        if ((features & WriteClassName.mask) == 0) {
             return false;
         }
 
@@ -390,7 +402,7 @@ public abstract class JSONWriter
             return false;
         }
 
-        if ((features & Feature.NotWriteHashMapArrayListClassName.mask) != 0) {
+        if ((features & NotWriteHashMapArrayListClassName.mask) != 0) {
             if (objectClass == HashMap.class) {
                 if (fieldClass == null || fieldClass == Object.class || fieldClass == Map.class || fieldClass == AbstractMap.class) {
                     return false;
@@ -400,7 +412,7 @@ public abstract class JSONWriter
             }
         }
 
-        return (features & Feature.NotWriteRootClassName.mask) == 0
+        return (features & NotWriteRootClassName.mask) == 0
                 || object != this.rootObject;
     }
 
@@ -416,11 +428,11 @@ public abstract class JSONWriter
 
         features |= context.features;
 
-        if ((features & Feature.WriteClassName.mask) == 0) {
+        if ((features & WriteClassName.mask) == 0) {
             return false;
         }
 
-        if ((features & Feature.NotWriteHashMapArrayListClassName.mask) != 0) {
+        if ((features & NotWriteHashMapArrayListClassName.mask) != 0) {
             if (objectClass == HashMap.class) {
                 if (fieldClass == null || fieldClass == Object.class || fieldClass == Map.class || fieldClass == AbstractMap.class) {
                     return false;
@@ -430,7 +442,7 @@ public abstract class JSONWriter
             }
         }
 
-        return (features & Feature.NotWriteRootClassName.mask) == 0
+        return (features & NotWriteRootClassName.mask) == 0
                 || object != this.rootObject;
     }
 
@@ -446,27 +458,27 @@ public abstract class JSONWriter
 
         features |= context.features;
 
-        if ((features & Feature.WriteClassName.mask) == 0) {
+        if ((features & WriteClassName.mask) == 0) {
             return false;
         }
 
-        if ((features & Feature.NotWriteHashMapArrayListClassName.mask) != 0) {
+        if ((features & NotWriteHashMapArrayListClassName.mask) != 0) {
             if (objectClass == HashMap.class) {
                 return false;
             }
         }
 
-        return (features & Feature.NotWriteRootClassName.mask) == 0 || object != this.rootObject;
+        return (features & NotWriteRootClassName.mask) == 0 || object != this.rootObject;
     }
 
     public final boolean isWriteTypeInfo(Object object, long features) {
         features |= context.features;
 
-        if ((features & Feature.WriteClassName.mask) == 0) {
+        if ((features & WriteClassName.mask) == 0) {
             return false;
         }
 
-        if ((features & Feature.NotWriteHashMapArrayListClassName.mask) != 0) {
+        if ((features & NotWriteHashMapArrayListClassName.mask) != 0) {
             if (object != null) {
                 Class objectClass = object.getClass();
                 if (objectClass == HashMap.class || objectClass == ArrayList.class) {
@@ -475,22 +487,22 @@ public abstract class JSONWriter
             }
         }
 
-        return (features & Feature.NotWriteRootClassName.mask) == 0
+        return (features & NotWriteRootClassName.mask) == 0
                 || object != this.rootObject;
     }
 
     public final ObjectWriter getObjectWriter(Class objectClass) {
-        boolean fieldBased = (context.features & Feature.FieldBased.mask) != 0;
+        boolean fieldBased = (context.features & FieldBased.mask) != 0;
         return context.provider.getObjectWriter(objectClass, objectClass, fieldBased);
     }
 
     public final ObjectWriter getObjectWriter(Type objectType, Class objectClass) {
-        boolean fieldBased = (context.features & Feature.FieldBased.mask) != 0;
+        boolean fieldBased = (context.features & FieldBased.mask) != 0;
         return context.provider.getObjectWriter(objectType, objectClass, fieldBased);
     }
 
     public static JSONWriter of() {
-        JSONWriter.Context writeContext = new JSONWriter.Context(JSONFactory.defaultObjectWriterProvider);
+        JSONWriter.Context writeContext = new JSONWriter.Context(defaultObjectWriterProvider);
         JSONWriter jsonWriter;
         if (JVM_VERSION == 8) {
             if (FIELD_STRING_VALUE != null && !ANDROID && !OPENJ9) {
@@ -498,7 +510,7 @@ public abstract class JSONWriter
             } else {
                 jsonWriter = new JSONWriterUTF16JDK8(writeContext);
             }
-        } else if ((defaultWriterFeatures & Feature.OptimizedForAscii.mask) != 0) {
+        } else if ((defaultWriterFeatures & OptimizedForAscii.mask) != 0) {
             if (STRING_VALUE != null) {
                 if (INCUBATOR_VECTOR_WRITER_CREATOR_UTF8 != null) {
                     jsonWriter = INCUBATOR_VECTOR_WRITER_CREATOR_UTF8.apply(writeContext);
@@ -511,7 +523,7 @@ public abstract class JSONWriter
         } else {
             if (INCUBATOR_VECTOR_WRITER_CREATOR_UTF16 != null) {
                 jsonWriter = INCUBATOR_VECTOR_WRITER_CREATOR_UTF16.apply(writeContext);
-            } else if (FIELD_STRING_VALUE != null && STRING_CODER != null && STRING_VALUE != null && UNSAFE_SUPPORT) {
+            } else if (FIELD_STRING_VALUE != null && STRING_CODER != null && STRING_VALUE != null) {
                 jsonWriter = new JSONWriterUTF16JDK9UF(writeContext);
             } else {
                 jsonWriter = new JSONWriterUTF16(writeContext);
@@ -528,7 +540,7 @@ public abstract class JSONWriter
 
     public static JSONWriter of(Context context) {
         if (context == null) {
-            context = JSONFactory.createWriteContext();
+            context = createWriteContext();
         }
 
         JSONWriter jsonWriter;
@@ -538,7 +550,7 @@ public abstract class JSONWriter
             } else {
                 jsonWriter = new JSONWriterUTF16JDK8(context);
             }
-        } else if ((context.features & Feature.OptimizedForAscii.mask) != 0) {
+        } else if ((context.features & OptimizedForAscii.mask) != 0) {
             if (STRING_VALUE != null) {
                 if (INCUBATOR_VECTOR_WRITER_CREATOR_UTF8 != null) {
                     jsonWriter = INCUBATOR_VECTOR_WRITER_CREATOR_UTF8.apply(context);
@@ -560,7 +572,7 @@ public abstract class JSONWriter
     }
 
     public static JSONWriter of(Feature... features) {
-        Context writeContext = JSONFactory.createWriteContext(features);
+        Context writeContext = createWriteContext(features);
         JSONWriter jsonWriter;
         if (JVM_VERSION == 8) {
             if (FIELD_STRING_VALUE != null && !ANDROID && !OPENJ9) {
@@ -568,7 +580,7 @@ public abstract class JSONWriter
             } else {
                 jsonWriter = new JSONWriterUTF16JDK8(writeContext);
             }
-        } else if ((writeContext.features & Feature.OptimizedForAscii.mask) != 0) {
+        } else if ((writeContext.features & OptimizedForAscii.mask) != 0) {
             if (STRING_VALUE != null) {
                 if (INCUBATOR_VECTOR_WRITER_CREATOR_UTF8 != null) {
                     jsonWriter = INCUBATOR_VECTOR_WRITER_CREATOR_UTF8.apply(writeContext);
@@ -590,7 +602,7 @@ public abstract class JSONWriter
     }
 
     public static JSONWriter ofUTF16(Feature... features) {
-        Context writeContext = JSONFactory.createWriteContext(features);
+        Context writeContext = createWriteContext(features);
         JSONWriter jsonWriter;
         if (JVM_VERSION == 8) {
             if (FIELD_STRING_VALUE != null && !ANDROID && !OPENJ9) {
@@ -611,7 +623,7 @@ public abstract class JSONWriter
 
     public static JSONWriter ofJSONB() {
         return new JSONWriterJSONB(
-                new JSONWriter.Context(JSONFactory.defaultObjectWriterProvider),
+                new JSONWriter.Context(defaultObjectWriterProvider),
                 null
         );
     }
@@ -626,14 +638,14 @@ public abstract class JSONWriter
 
     public static JSONWriter ofJSONB(Feature... features) {
         return new JSONWriterJSONB(
-                new JSONWriter.Context(JSONFactory.defaultObjectWriterProvider, features),
+                new JSONWriter.Context(defaultObjectWriterProvider, features),
                 null
         );
     }
 
     public static JSONWriter ofJSONB(SymbolTable symbolTable) {
         return new JSONWriterJSONB(
-                new JSONWriter.Context(JSONFactory.defaultObjectWriterProvider),
+                new JSONWriter.Context(defaultObjectWriterProvider),
                 symbolTable
         );
     }
@@ -704,7 +716,7 @@ public abstract class JSONWriter
             return;
         }
 
-        if ((context.features & Feature.WriteByteArrayAsBase64.mask) != 0) {
+        if ((context.features & WriteByteArrayAsBase64.mask) != 0) {
             writeBase64(bytes);
             return;
         }
@@ -756,12 +768,86 @@ public abstract class JSONWriter
 
     public abstract void writeNameRaw(byte[] bytes);
 
+    public void writeName2Raw(long name) {
+        throw new JSONException("UnsupportedOperation");
+    }
+
+    public void writeName3Raw(long name) {
+        throw new JSONException("UnsupportedOperation");
+    }
+
+    public void writeName4Raw(long name) {
+        throw new JSONException("UnsupportedOperation");
+    }
+
+    public void writeName5Raw(long name) {
+        throw new JSONException("UnsupportedOperation");
+    }
+
+    public void writeName6Raw(long name) {
+        throw new JSONException("UnsupportedOperation");
+    }
+
+    public void writeName7Raw(long name) {
+        throw new JSONException("UnsupportedOperation");
+    }
+
+    public void writeName8Raw(long name0) {
+        throw new JSONException("UnsupportedOperation");
+    }
+
+    public void writeName9Raw(long name0, int name1) {
+        throw new JSONException("UnsupportedOperation");
+    }
+
+    public void writeName10Raw(long name0, long name1) {
+        throw new JSONException("UnsupportedOperation");
+    }
+
+    public void writeName11Raw(long name0, long name2) {
+        throw new JSONException("UnsupportedOperation");
+    }
+
+    public void writeName12Raw(long name0, long name2) {
+        throw new JSONException("UnsupportedOperation");
+    }
+
+    public void writeName13Raw(long name0, long name2) {
+        throw new JSONException("UnsupportedOperation");
+    }
+
+    public void writeName14Raw(long name0, long name2) {
+        throw new JSONException("UnsupportedOperation");
+    }
+
+    public void writeName15Raw(long name0, long name2) {
+        throw new JSONException("UnsupportedOperation");
+    }
+
     public void writeSymbol(int symbol) {
         throw new JSONException("UnsupportedOperation");
     }
 
     public void writeNameRaw(byte[] name, long nameHash) {
         throw new JSONException("UnsupportedOperation");
+    }
+
+    protected boolean isWriteAsString(long value, long features) {
+        boolean browserCompatible = (features & BrowserCompatible.mask) != 0 && !isJavaScriptSupport(value);
+        boolean nonStringAsString = (features & (WriteNonStringValueAsString.mask | WriteLongAsString.mask)) != 0;
+        return browserCompatible || nonStringAsString;
+    }
+
+    protected boolean isWriteAsString(BigInteger value, long features) {
+        boolean browserCompatible = (features & BrowserCompatible.mask) != 0 && !isJavaScriptSupport(value);
+        boolean nonStringAsString = (features & (WriteNonStringValueAsString.mask)) != 0;
+        return browserCompatible || nonStringAsString;
+    }
+
+    protected boolean isWriteAsString(BigDecimal value, long features) {
+        boolean browserCompatible = (features & BrowserCompatible.mask) != 0 && !isJavaScriptSupport(value) && value.precision() >= 16;
+        boolean nonStringAsString = (features & (WriteNonStringValueAsString.mask)) != 0;
+        return browserCompatible || nonStringAsString;
     }
 
     public abstract void writeNameRaw(char[] chars);
@@ -861,15 +947,15 @@ public abstract class JSONWriter
 
     public abstract void writeInt32(int value);
 
+    public abstract void writeInt32(Integer i);
+
     public final void writeInt32(int value, DecimalFormat format) {
         if (format == null || jsonb) {
             writeInt32(value);
             return;
         }
 
-        writeString(
-                format.format(value)
-        );
+        writeString(format.format(value));
     }
 
     public final void writeInt32(int value, String format) {
@@ -878,18 +964,22 @@ public abstract class JSONWriter
             return;
         }
 
-        writeString(
-                String.format(format, value)
-        );
+        writeString(String.format(format, value));
     }
 
     public abstract void writeInt64(long i);
+
+    public abstract void writeInt64(Long i);
 
     public void writeMillis(long i) {
         writeInt64(i);
     }
 
     public abstract void writeInt64(long[] value);
+
+    public abstract void writeListInt64(List<Long> values);
+
+    public abstract void writeListInt32(List<Integer> values);
 
     public abstract void writeFloat(float value);
 
@@ -926,6 +1016,7 @@ public abstract class JSONWriter
     public final void writeFloat(float[] value, DecimalFormat format) {
         if (format == null || jsonb) {
             writeFloat(value);
+            return;
         }
 
         if (value == null) {
@@ -1001,13 +1092,7 @@ public abstract class JSONWriter
 
     public abstract void writeDouble(double[] value);
 
-    public void writeBool(boolean value) {
-        if ((context.features & Feature.WriteBooleanAsNumber.mask) != 0) {
-            write0(value ? '1' : '0');
-        } else {
-            writeRaw(value ? "true" : "false");
-        }
-    }
+    public abstract void writeBool(boolean value);
 
     public void writeBool(boolean[] value) {
         if (value == null) {
@@ -1025,14 +1110,12 @@ public abstract class JSONWriter
         endArray();
     }
 
-    public void writeNull() {
-        writeRaw("null");
-    }
+    public abstract void writeNull();
 
     public void writeStringNull() {
         String raw;
-        if ((this.context.features & (Feature.NullAsDefaultValue.mask | Feature.WriteNullStringAsEmpty.mask)) != 0) {
-            raw = (this.context.features & Feature.UseSingleQuotes.mask) != 0 ? "''" : "\"\"";
+        if ((this.context.features & (NullAsDefaultValue.mask | WriteNullStringAsEmpty.mask)) != 0) {
+            raw = (this.context.features & UseSingleQuotes.mask) != 0 ? "''" : "\"\"";
         } else {
             raw = "null";
         }
@@ -1041,7 +1124,7 @@ public abstract class JSONWriter
 
     public void writeArrayNull() {
         String raw;
-        if ((this.context.features & (Feature.NullAsDefaultValue.mask | Feature.WriteNullListAsEmpty.mask)) != 0) {
+        if ((this.context.features & (NullAsDefaultValue.mask | WriteNullListAsEmpty.mask)) != 0) {
             raw = "[]";
         } else {
             raw = "null";
@@ -1050,15 +1133,15 @@ public abstract class JSONWriter
     }
 
     public final void writeNumberNull() {
-        if ((this.context.features & (Feature.NullAsDefaultValue.mask | Feature.WriteNullNumberAsZero.mask)) != 0) {
-            writeInt32(0);
+        if ((this.context.features & (NullAsDefaultValue.mask | WriteNullNumberAsZero.mask)) != 0) {
+            writeInt64(0);
         } else {
             writeNull();
         }
     }
 
     public final void writeBooleanNull() {
-        if ((this.context.features & (Feature.NullAsDefaultValue.mask | Feature.WriteNullBooleanAsFalse.mask)) != 0) {
+        if ((this.context.features & (NullAsDefaultValue.mask | WriteNullBooleanAsFalse.mask)) != 0) {
             writeBool(false);
         } else {
             writeNull();
@@ -1081,9 +1164,9 @@ public abstract class JSONWriter
             return;
         }
 
-        if ((context.features & Feature.WriteEnumUsingToString.mask) != 0) {
+        if ((context.features & WriteEnumUsingToString.mask) != 0) {
             writeString(e.toString());
-        } else if ((context.features & Feature.WriteEnumsUsingName.mask) != 0) {
+        } else if ((context.features & WriteEnumsUsingName.mask) != 0) {
             writeString(e.name());
         } else {
             writeInt32(e.ordinal());
@@ -1101,11 +1184,11 @@ public abstract class JSONWriter
     public final void checkAndWriteTypeName(Object object, Class fieldClass) {
         long features = context.features;
         Class objectClass;
-        if ((features & Feature.WriteClassName.mask) == 0
+        if ((features & WriteClassName.mask) == 0
                 || object == null
                 || (objectClass = object.getClass()) == fieldClass
-                || ((features & Feature.NotWriteHashMapArrayListClassName.mask) != 0 && (objectClass == HashMap.class || objectClass == ArrayList.class))
-                || ((features & Feature.NotWriteRootClassName.mask) != 0 && object == this.rootObject)
+                || ((features & NotWriteHashMapArrayListClassName.mask) != 0 && (objectClass == HashMap.class || objectClass == ArrayList.class))
+                || ((features & NotWriteRootClassName.mask) != 0 && object == this.rootObject)
         ) {
             return;
         }
@@ -1207,6 +1290,8 @@ public abstract class JSONWriter
     public abstract void writeZonedDateTime(ZonedDateTime dateTime);
 
     public abstract void writeOffsetDateTime(OffsetDateTime dateTime);
+
+    public abstract void writeOffsetTime(OffsetTime dateTime);
 
     public void writeInstant(Instant instant) {
         if (instant == null) {
@@ -1330,6 +1415,19 @@ public abstract class JSONWriter
         objectWriter.write(this, value, null, null, 0);
     }
 
+    /**
+     * @since 2.0.43
+     */
+    public final void writeAs(Object value, Class type) {
+        if (value == null) {
+            writeNull();
+            return;
+        }
+
+        ObjectWriter objectWriter = context.getObjectWriter(type);
+        objectWriter.write(this, value, null, null, 0);
+    }
+
     public abstract void writeReference(String path);
 
     @Override
@@ -1389,6 +1487,7 @@ public abstract class JSONWriter
 
             this.features = defaultWriterFeatures;
             this.provider = provider;
+            this.zoneId = defaultWriterZoneId;
 
             String format = defaultWriterFormat;
             if (format != null) {
@@ -1398,7 +1497,8 @@ public abstract class JSONWriter
 
         public Context(Feature... features) {
             this.features = defaultWriterFeatures;
-            this.provider = JSONFactory.getDefaultObjectWriterProvider();
+            this.provider = getDefaultObjectWriterProvider();
+            this.zoneId = defaultWriterZoneId;
 
             String format = defaultWriterFormat;
             if (format != null) {
@@ -1412,7 +1512,8 @@ public abstract class JSONWriter
 
         public Context(String format, Feature... features) {
             this.features = defaultWriterFeatures;
-            this.provider = JSONFactory.getDefaultObjectWriterProvider();
+            this.provider = getDefaultObjectWriterProvider();
+            this.zoneId = defaultWriterZoneId;
 
             for (int i = 0; i < features.length; i++) {
                 this.features |= features[i].mask;
@@ -1433,6 +1534,7 @@ public abstract class JSONWriter
 
             this.features = defaultWriterFeatures;
             this.provider = provider;
+            this.zoneId = defaultWriterZoneId;
 
             for (int i = 0; i < features.length; i++) {
                 this.features |= features[i].mask;
@@ -1530,12 +1632,12 @@ public abstract class JSONWriter
         }
 
         public <T> ObjectWriter<T> getObjectWriter(Class<T> objectType) {
-            boolean fieldBased = (features & Feature.FieldBased.mask) != 0;
+            boolean fieldBased = (features & FieldBased.mask) != 0;
             return provider.getObjectWriter(objectType, objectType, fieldBased);
         }
 
         public <T> ObjectWriter<T> getObjectWriter(Type objectType, Class<T> objectClass) {
-            boolean fieldBased = (features & Feature.FieldBased.mask) != 0;
+            boolean fieldBased = (features & FieldBased.mask) != 0;
             return provider.getObjectWriter(objectType, objectClass, fieldBased);
         }
 
@@ -1969,6 +2071,7 @@ public abstract class JSONWriter
                                 case '\\':
                                 case '"':
                                 case '\'':
+                                case ',':
                                     if (off + 1 >= buf.length) {
                                         int newCapacity = buf.length + (buf.length >> 1);
                                         buf = Arrays.copyOf(buf, newCapacity);
@@ -2082,6 +2185,7 @@ public abstract class JSONWriter
                                 case '\\':
                                 case '"':
                                 case '\'':
+                                case ',':
                                     if (off + 1 >= buf.length) {
                                         int newCapacity = buf.length + (buf.length >> 1);
                                         buf = Arrays.copyOf(buf, newCapacity);

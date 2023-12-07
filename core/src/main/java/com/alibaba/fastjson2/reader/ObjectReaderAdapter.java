@@ -9,6 +9,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Type;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -174,7 +175,7 @@ public class ObjectReaderAdapter<T>
 
         this.seeAlso = seeAlso;
         if (seeAlso != null) {
-            this.seeAlsoMapping = new HashMap<>(seeAlso.length);
+            this.seeAlsoMapping = new HashMap<>(seeAlso.length, 1F);
             this.seeAlsoNames = new String[seeAlso.length];
             for (int i = 0; i < seeAlso.length; i++) {
                 Class seeAlsoClass = seeAlso[i];
@@ -214,6 +215,12 @@ public class ObjectReaderAdapter<T>
 
     public FieldReader[] getFieldReaders() {
         return Arrays.copyOf(this.fieldReaders, this.fieldReaders.length);
+    }
+
+    public void apply(Consumer<FieldReader> fieldReaderConsumer) {
+        for (FieldReader fieldReader : fieldReaders) {
+            fieldReaderConsumer.accept(fieldReader);
+        }
     }
 
     public Object auoType(JSONReader jsonReader, Class expectClass, long features) {
@@ -277,14 +284,31 @@ public class ObjectReaderAdapter<T>
             jsonReader.errorOnNoneSerializable(objectClass);
         }
 
-        ObjectReader autoTypeReader = checkAutoType(jsonReader, this.objectClass, this.features | features);
-        if (autoTypeReader != null && autoTypeReader != this && autoTypeReader.getObjectClass() != this.objectClass) {
+        ObjectReader autoTypeReader = checkAutoType(jsonReader, features);
+        if (autoTypeReader != null) {
             return (T) autoTypeReader.readArrayMappingJSONBObject(jsonReader, fieldType, fieldName, features);
         }
 
-        int entryCnt = jsonReader.startArray();
         T object = createInstance(0);
 
+        int entryCnt = jsonReader.startArray();
+        if (entryCnt == fieldReaders.length) {
+            for (int i = 0; i < fieldReaders.length; i++) {
+                FieldReader fieldReader = fieldReaders[i];
+                fieldReader.readFieldValue(jsonReader, object);
+            }
+        } else {
+            readArrayMappingJSONBObject0(jsonReader, object, entryCnt);
+        }
+
+        if (buildFunction != null) {
+            return (T) buildFunction.apply(object);
+        }
+
+        return object;
+    }
+
+    protected void readArrayMappingJSONBObject0(JSONReader jsonReader, Object object, int entryCnt) {
         for (int i = 0; i < fieldReaders.length; i++) {
             if (i >= entryCnt) {
                 continue;
@@ -296,12 +320,6 @@ public class ObjectReaderAdapter<T>
         for (int i = fieldReaders.length; i < entryCnt; i++) {
             jsonReader.skipValue();
         }
-
-        if (buildFunction != null) {
-            return (T) buildFunction.apply(object);
-        }
-
-        return object;
     }
 
     protected Object createInstance0(long features) {
@@ -406,6 +424,11 @@ public class ObjectReaderAdapter<T>
 
         int index = this.mapping[m];
         return fieldReaders[index];
+    }
+
+    public int getFieldOrdinal(long hashCode) {
+        int m = Arrays.binarySearch(hashCodes, hashCode);
+        return m < 0 ? -1 : this.mapping[m];
     }
 
     @Override
@@ -582,7 +605,7 @@ public class ObjectReaderAdapter<T>
         T object = createInstance(0L);
 
         if (extraFieldReader == null
-                && ((features | this.features) & JSONReader.Feature.SupportSmartMatch.mask) == 0
+                && ((features | this.features) & (JSONReader.Feature.SupportSmartMatch.mask | JSONReader.Feature.ErrorOnUnknownProperties.mask)) == 0
         ) {
             for (int i = 0; i < fieldReaders.length; i++) {
                 FieldReader fieldReader = fieldReaders[i];
@@ -622,7 +645,7 @@ public class ObjectReaderAdapter<T>
 
                 FieldReader fieldReader = getFieldReader(entryKey);
                 if (fieldReader == null) {
-                    acceptExtra(object, entryKey, entry.getValue());
+                    acceptExtra(object, entryKey, entry.getValue(), features);
                     continue;
                 }
 

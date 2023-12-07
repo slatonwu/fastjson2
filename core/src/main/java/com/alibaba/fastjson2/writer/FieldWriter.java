@@ -1,6 +1,7 @@
 package com.alibaba.fastjson2.writer;
 
 import com.alibaba.fastjson2.*;
+import com.alibaba.fastjson2.annotation.JSONField;
 import com.alibaba.fastjson2.codec.FieldInfo;
 import com.alibaba.fastjson2.util.*;
 
@@ -13,9 +14,11 @@ import java.text.DecimalFormat;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+import java.util.function.Function;
 import java.util.zip.GZIPOutputStream;
 
 import static com.alibaba.fastjson2.JSONWriter.Feature.*;
+import static com.alibaba.fastjson2.util.JDKUtils.UNSAFE;
 import static java.time.temporal.ChronoField.SECOND_OF_DAY;
 import static java.time.temporal.ChronoField.YEAR;
 
@@ -49,6 +52,7 @@ public abstract class FieldWriter<T>
 
     transient JSONWriter.Path path;
     volatile ObjectWriter initObjectWriter;
+    Object defaultValue;
 
     static final AtomicReferenceFieldUpdater<FieldWriter, ObjectWriter>
             initObjectWriterUpdater = AtomicReferenceFieldUpdater.newUpdater(
@@ -105,8 +109,8 @@ public abstract class FieldWriter<T>
         this.decimalFormat = decimalFormat;
 
         long fieldOffset = -1L;
-        if (field != null && JDKUtils.UNSAFE_SUPPORT) {
-            fieldOffset = UnsafeUtils.objectFieldOffset(field);
+        if (field != null) {
+            fieldOffset = UNSAFE.objectFieldOffset(field);
         }
         this.fieldOffset = fieldOffset;
 
@@ -179,6 +183,14 @@ public abstract class FieldWriter<T>
 
     public boolean unwrapped() {
         return false;
+    }
+
+    public final void writeFieldNameJSONB(JSONWriter jsonWriter) {
+        SymbolTable symbolTable = jsonWriter.symbolTable;
+        if (symbolTable != null && writeFieldNameSymbol(jsonWriter, symbolTable)) {
+            return;
+        }
+        jsonWriter.writeNameRaw(nameJSONB, hashCode);
     }
 
     public final void writeFieldName(JSONWriter jsonWriter) {
@@ -259,6 +271,51 @@ public abstract class FieldWriter<T>
         return fieldName;
     }
 
+    void setDefaultValue(T object) {
+        Object fieldValue = null;
+
+        if (Iterable.class.isAssignableFrom(fieldClass)
+                || Map.class.isAssignableFrom(fieldClass)
+        ) {
+            return;
+        }
+
+        if (field != null && object != null) {
+            try {
+                field.setAccessible(true);
+                fieldValue = field.get(object);
+            } catch (Throwable ignored) {
+                // ignored
+            }
+        }
+
+        if (fieldValue == null) {
+            return;
+        }
+
+        if (fieldClass == boolean.class) {
+            if (fieldValue == Boolean.FALSE) {
+                return;
+            }
+        } else if (fieldClass == byte.class
+                || fieldClass == short.class
+                || fieldClass == int.class
+                || fieldClass == long.class
+                || fieldClass == float.class
+                || fieldClass == double.class
+        ) {
+            if (((Number) fieldValue).doubleValue() == 0) {
+                return;
+            }
+        } else if (fieldClass == char.class) {
+            if ((Character) fieldValue == '\0') {
+                return;
+            }
+        }
+
+        defaultValue = fieldValue;
+    }
+
     public Object getFieldValue(T object) {
         if (object == null) {
             throw new JSONException("field.get error, " + fieldName);
@@ -268,7 +325,7 @@ public abstract class FieldWriter<T>
             try {
                 Object value;
                 if (fieldOffset != -1 && !primitive) {
-                    value = UnsafeUtils.getObject(object, fieldOffset);
+                    value = UNSAFE.getObject(object, fieldOffset);
                 } else {
                     value = field.get(object);
                 }
@@ -300,8 +357,18 @@ public abstract class FieldWriter<T>
             return nameCompare;
         }
 
-        Member thisMember = this.field != null ? this.field : this.method;
-        Member otherMember = other.field != null ? other.field : other.method;
+        Member thisMember;
+        Member otherMember;
+        if (this.method == null || (this.field != null && Modifier.isPublic(this.field.getModifiers()))) {
+            thisMember = this.field;
+        } else {
+            thisMember = this.method;
+        }
+        if (other.method == null || (other.field != null && Modifier.isPublic(other.field.getModifiers()))) {
+            otherMember = other.field;
+        } else {
+            otherMember = other.method;
+        }
 
         if (thisMember != null && otherMember != null) {
             Class otherDeclaringClass = otherMember.getDeclaringClass();
@@ -313,13 +380,39 @@ public abstract class FieldWriter<T>
                     return -1;
                 }
             }
+
+            JSONField thisField = null;
+            JSONField otherField = null;
+            if (thisMember instanceof Field) {
+                thisField = ((Field) thisMember).getAnnotation(JSONField.class);
+            } else if (thisMember instanceof Method) {
+                thisField = ((Method) thisMember).getAnnotation(JSONField.class);
+            }
+            if (otherMember instanceof Field) {
+                otherField = ((Field) otherMember).getAnnotation(JSONField.class);
+            } else if (thisMember instanceof Method) {
+                otherField = ((Method) otherMember).getAnnotation(JSONField.class);
+            }
+
+            if (thisField != null && otherField == null) {
+                return -1;
+            }
+            if (thisField == null && otherField != null) {
+                return 1;
+            }
         }
 
-        if (thisMember instanceof Field && otherMember instanceof Method) {
+        if (thisMember instanceof Field
+                && otherMember instanceof Method
+                && ((Field) thisMember).getType() == ((Method) otherMember).getReturnType()
+        ) {
             return -1;
         }
 
-        if (thisMember instanceof Method && otherMember instanceof Field) {
+        if (thisMember instanceof Method
+                && otherMember instanceof Field
+                && ((Method) thisMember).getReturnType() == ((Field) otherMember).getType()
+        ) {
             return 1;
         }
 
@@ -365,6 +458,22 @@ public abstract class FieldWriter<T>
                     return -1;
                 }
             }
+        }
+
+        if (thisFieldClass.isPrimitive() && !otherFieldClass.isPrimitive()) {
+            return -1;
+        }
+
+        if (!thisFieldClass.isPrimitive() && otherFieldClass.isPrimitive()) {
+            return 1;
+        }
+
+        if (thisFieldClass.getName().startsWith("java.") && !otherFieldClass.getName().startsWith("java.")) {
+            return -1;
+        }
+
+        if (!thisFieldClass.getName().startsWith("java.") && otherFieldClass.getName().startsWith("java.")) {
+            return 1;
         }
 
         return nameCompare;
@@ -709,7 +818,19 @@ public abstract class FieldWriter<T>
         return jsonWriter.getObjectWriter(valueClass);
     }
 
-    public void writeList(JSONWriter jsonWriter, boolean writeFieldName, List list) {
+    public void writeListValueJSONB(JSONWriter jsonWriter, List list) {
+        throw new UnsupportedOperationException();
+    }
+
+    public void writeListValue(JSONWriter jsonWriter, List list) {
+        throw new UnsupportedOperationException();
+    }
+
+    public void writeListJSONB(JSONWriter jsonWriter, List list) {
+        throw new UnsupportedOperationException();
+    }
+
+    public void writeList(JSONWriter jsonWriter, List list) {
         throw new UnsupportedOperationException();
     }
 
@@ -743,6 +864,14 @@ public abstract class FieldWriter<T>
                     return ObjectWriterImplZonedDateTime.INSTANCE;
                 } else {
                     return new ObjectWriterImplZonedDateTime(format, locale);
+                }
+            }
+
+            if (OffsetDateTime.class.isAssignableFrom(valueClass)) {
+                if (format == null || format.isEmpty()) {
+                    return ObjectWriterImplOffsetDateTime.INSTANCE;
+                } else {
+                    return ObjectWriterImplOffsetDateTime.of(format, locale);
                 }
             }
 
@@ -826,6 +955,10 @@ public abstract class FieldWriter<T>
             }
         }
 
+        return null;
+    }
+
+    public Function getFunction() {
         return null;
     }
 }

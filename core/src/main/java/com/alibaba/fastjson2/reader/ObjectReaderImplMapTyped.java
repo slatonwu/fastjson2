@@ -7,10 +7,7 @@ import com.alibaba.fastjson2.util.TypeUtils;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -248,7 +245,7 @@ class ObjectReaderImplMapTyped
                 value = jsonReader.readAny();
             } else {
                 ObjectReader autoTypeValueReader = jsonReader.checkAutoType(valueClass, 0, features);
-                if (autoTypeValueReader != null) {
+                if (autoTypeValueReader != null && autoTypeValueReader != this) {
                     value = autoTypeValueReader.readJSONBObject(jsonReader, valueType, name, features);
                 } else {
                     if (valueObjectReader == null) {
@@ -257,10 +254,18 @@ class ObjectReaderImplMapTyped
                     value = valueObjectReader.readJSONBObject(jsonReader, valueType, name, features);
                 }
             }
+
+            if (value == null && (contextFeatures & JSONReader.Feature.IgnoreNullPropertyValue.mask) != 0) {
+                continue;
+            }
+
             object.put(name, value);
         }
 
         if (builder != null) {
+            if (builder == ObjectReaderImplMap.ENUM_MAP_BUILDER && object.isEmpty()) {
+                return new EnumMap((Class) keyType);
+            }
             return builder.apply(object);
         }
 
@@ -288,8 +293,14 @@ class ObjectReaderImplMapTyped
         if (instanceType == HashMap.class) {
             Supplier<Map> objectSupplier = context.getObjectSupplier();
             if (mapType == Map.class && objectSupplier != null) {
-                object = objectSupplier.get();
-                innerMap = TypeUtils.getInnerMap(object);
+                if (keyType != String.class
+                        && objectSupplier.getClass().getName().equals("com.alibaba.fastjson.JSONObject$Creator")
+                ) {
+                    object = new HashMap();
+                } else {
+                    object = objectSupplier.get();
+                    innerMap = TypeUtils.getInnerMap(object);
+                }
             } else {
                 object = new HashMap<>();
             }
@@ -370,7 +381,24 @@ class ObjectReaderImplMapTyped
             if (valueObjectReader == null) {
                 valueObjectReader = jsonReader.getObjectReader(valueType);
             }
-            Object value = valueObjectReader.readObject(jsonReader, valueType, fieldName, 0);
+
+            Object value;
+            if (jsonReader.isReference()) {
+                String reference = jsonReader.readReference();
+                if ("..".equals(reference)) {
+                    value = object;
+                } else {
+                    jsonReader.addResolveTask(object, name, JSONPath.of(reference));
+                    continue;
+                }
+            } else {
+                value = valueObjectReader.readObject(jsonReader, valueType, fieldName, 0);
+            }
+
+            if (value == null && (contextFeatures & JSONReader.Feature.IgnoreNullPropertyValue.mask) != 0) {
+                continue;
+            }
+
             Object origin;
             if (innerMap != null) {
                 origin = innerMap.put(name, value);

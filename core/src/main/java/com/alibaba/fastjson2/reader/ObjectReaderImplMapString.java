@@ -17,7 +17,7 @@ final class ObjectReaderImplMapString
 
     @Override
     public Object readObject(JSONReader jsonReader, Type fieldType, Object fieldName, long features) {
-        if (jsonReader.isJSONB()) {
+        if (jsonReader.jsonb) {
             return this.readJSONBObject(jsonReader, fieldType, fieldName, features);
         }
 
@@ -35,7 +35,7 @@ final class ObjectReaderImplMapString
                 throw new JSONException(jsonReader.info("expect '{', but '['"));
             }
 
-            if (jsonReader.nextIfNullOrEmptyString()) {
+            if (jsonReader.nextIfNullOrEmptyString() || jsonReader.nextIfMatchIdent('"', 'n', 'u', 'l', 'l', '"')) {
                 return null;
             }
         }
@@ -57,6 +57,10 @@ final class ObjectReaderImplMapString
             if (i == 0
                     && (contextFeatures & JSONReader.Feature.SupportAutoType.mask) != 0
                     && name.equals(getTypeKey())) {
+                continue;
+            }
+
+            if (value == null && (contextFeatures & JSONReader.Feature.IgnoreNullPropertyValue.mask) != 0) {
                 continue;
             }
 

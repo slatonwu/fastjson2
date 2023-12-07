@@ -75,7 +75,8 @@ public class FieldWriterObject<T>
             return getObjectWriterVoid(jsonWriter, valueClass);
         } else {
             boolean typeMatch = initValueClass == valueClass
-                    || (initValueClass == Map.class && initValueClass.isAssignableFrom(valueClass));
+                    || (initValueClass == Map.class && initValueClass.isAssignableFrom(valueClass))
+                    || (initValueClass == List.class && initValueClass.isAssignableFrom(valueClass));
             if (!typeMatch && initValueClass.isPrimitive()) {
                 typeMatch = typeMatch(initValueClass, valueClass);
             }
@@ -206,6 +207,34 @@ public class FieldWriterObject<T>
         }
         initObjectWriterUpdater.compareAndSet(this, null, objectWriter);
         return objectWriter;
+    }
+
+    @Override
+    public void writeEnumJSONB(JSONWriter jsonWriter, Enum e) {
+        if (e == null) {
+            return;
+        }
+
+        writeFieldName(jsonWriter);
+
+        Class<?> valueClass = e.getClass();
+        ObjectWriter valueWriter;
+        if (initValueClass == null) {
+            initValueClass = valueClass;
+            valueWriter = jsonWriter.getObjectWriter(valueClass);
+            initObjectWriterUpdater.compareAndSet(this, null, valueWriter);
+        } else {
+            if (initValueClass == valueClass) {
+                valueWriter = initObjectWriter;
+            } else {
+                valueWriter = jsonWriter.getObjectWriter(valueClass);
+            }
+        }
+        if (valueWriter == null) {
+            throw new JSONException("get value writer error, valueType : " + valueClass);
+        }
+
+        valueWriter.writeJSONB(jsonWriter, e, fieldName, fieldType, this.features);
     }
 
     @Override

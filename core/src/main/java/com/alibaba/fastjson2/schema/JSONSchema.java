@@ -2,18 +2,30 @@ package com.alibaba.fastjson2.schema;
 
 import com.alibaba.fastjson2.*;
 import com.alibaba.fastjson2.annotation.JSONCreator;
+import com.alibaba.fastjson2.annotation.JSONType;
+import com.alibaba.fastjson2.reader.FieldReader;
 import com.alibaba.fastjson2.reader.ObjectReader;
+import com.alibaba.fastjson2.reader.ObjectReaderAdapter;
+import com.alibaba.fastjson2.reader.ObjectReaderBean;
+import com.alibaba.fastjson2.writer.ObjectWriter;
 
+import java.lang.reflect.GenericArrayType;
+import java.lang.reflect.ParameterizedType;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 
+@JSONType(serializer = JSONSchema.JSONSchemaWriter.class)
 public abstract class JSONSchema {
     static final Map<String, JSONSchema> CACHE = new ConcurrentHashMap<>();
 
@@ -30,6 +42,9 @@ public abstract class JSONSchema {
     JSONSchema(String title, String description) {
         this.title = title;
         this.description = description;
+    }
+
+    void addResolveTask(UnresolvedReference.ResolveTask task){
     }
 
     public static JSONSchema of(JSONObject input, Class objectClass) {
@@ -119,7 +134,7 @@ public abstract class JSONSchema {
         JSONObject object = (JSONObject) not;
 
         if (object == null || object.isEmpty()) {
-            return new Not(null, new Type[] {Type.Any}, null);
+            return new Not(null, new Type[]{Type.Any}, null);
         }
 
         if (object.size() == 1) {
@@ -157,6 +172,203 @@ public abstract class JSONSchema {
     @JSONCreator
     public static JSONSchema of(JSONObject input) {
         return of(input, (JSONSchema) null);
+    }
+
+    public static JSONSchema of(java.lang.reflect.Type type) {
+        return of(type, null);
+    }
+
+    public static JSONSchema ofValue(Object value) {
+        return ofValue(value, null);
+    }
+
+    static JSONSchema ofValue(Object value, JSONSchema root) {
+        if (value == null) {
+            return null;
+        }
+
+        if (value instanceof Collection) {
+            Collection collection = (Collection) value;
+            if (collection.isEmpty()) {
+                return new ArraySchema(JSONObject.of("type", "array"), root);
+            }
+
+            Object firstItem = null;
+            Class firstItemClass = null;
+            boolean sameClass = true;
+            for (Object item : collection) {
+                if (item != null) {
+                    if (firstItem == null) {
+                        firstItem = item;
+                    }
+
+                    if (firstItemClass == null) {
+                        firstItemClass = item.getClass();
+                    } else if (firstItemClass != item.getClass()) {
+                        sameClass = false;
+                    }
+                }
+            }
+
+            if (sameClass) {
+                JSONSchema itemSchema;
+                if (Map.class.isAssignableFrom(firstItemClass)) {
+                    itemSchema = ofValue(firstItem, root);
+                } else {
+                    itemSchema = of(firstItemClass, root);
+                }
+                ArraySchema schema = new ArraySchema(JSONObject.of("type", "array"), root);
+                schema.itemSchema = itemSchema;
+                return schema;
+            }
+        }
+
+        if (value instanceof Map) {
+            JSONObject object = JSONObject.of("type", "object");
+            ObjectSchema schema = new ObjectSchema(object, root);
+
+            Map map = (Map) value;
+            for (Iterator it = map.entrySet().iterator(); it.hasNext(); ) {
+                Map.Entry entry = (Map.Entry) it.next();
+                Object entryKey = entry.getKey();
+                Object entryValue = entry.getValue();
+
+                if (entryKey instanceof String) {
+                    JSONSchema valueSchema;
+                    if (entryValue == null) {
+                        valueSchema = new StringSchema(JSONObject.of());
+                    } else {
+                        valueSchema = ofValue(entryValue, root == null ? schema : root);
+                    }
+                    schema.properties.put((String) entryKey, valueSchema);
+                }
+            }
+
+            return schema;
+        }
+
+        return of(value.getClass(), root);
+    }
+
+    static JSONSchema of(java.lang.reflect.Type type, JSONSchema root) {
+        if (type instanceof ParameterizedType) {
+            ParameterizedType paramType = (ParameterizedType) type;
+
+            java.lang.reflect.Type rawType = paramType.getRawType();
+            java.lang.reflect.Type[] arguments = paramType.getActualTypeArguments();
+
+            if (rawType instanceof Class && Collection.class.isAssignableFrom((Class) rawType)) {
+                JSONObject object = JSONObject.of("type", "array");
+                ArraySchema arraySchema = new ArraySchema(object, root);
+                if (arguments.length == 1) {
+                    arraySchema.itemSchema = of(arguments[0], root == null ? arraySchema : root);
+                }
+
+                return arraySchema;
+            }
+
+            if (rawType instanceof Class
+                    && Map.class.isAssignableFrom((Class) rawType)
+            ) {
+                JSONObject object = JSONObject.of("type", "object");
+                return new ObjectSchema(object, root);
+            }
+        }
+
+        if (type instanceof GenericArrayType) {
+            GenericArrayType arrayType = (GenericArrayType) type;
+            java.lang.reflect.Type componentType = arrayType.getGenericComponentType();
+            JSONObject object = JSONObject.of("type", "array");
+            ArraySchema arraySchema = new ArraySchema(object, root);
+            arraySchema.itemSchema = of(componentType, root == null ? arraySchema : root);
+            return arraySchema;
+        }
+
+        if (type == byte.class
+                || type == short.class
+                || type == int.class
+                || type == long.class
+                || type == Byte.class
+                || type == Short.class
+                || type == Integer.class
+                || type == Long.class
+                || type == BigInteger.class
+                || type == AtomicInteger.class
+                || type == AtomicLong.class
+        ) {
+            return new IntegerSchema(JSONObject.of("type", "integer"));
+        }
+
+        if (type == float.class
+                || type == double.class
+                || type == Float.class
+                || type == Double.class
+                || type == BigDecimal.class
+        ) {
+            return new NumberSchema(JSONObject.of("type", "number"));
+        }
+
+        if (type == boolean.class || type == Boolean.class || type == AtomicBoolean.class) {
+            return new BooleanSchema(JSONObject.of("type", "boolean"));
+        }
+
+        if (type == String.class) {
+            return new StringSchema(JSONObject.of("type", "string"));
+        }
+
+        if (type instanceof Class) {
+            Class schemaClass = (Class) type;
+            if (Enum.class.isAssignableFrom(schemaClass)) {
+                Object[] enums = schemaClass.getEnumConstants();
+                String[] names = new String[enums.length];
+                for (int i = 0; i < enums.length; i++) {
+                    names[i] = ((Enum) enums[i]).name();
+                }
+                return new StringSchema(JSONObject.of("type", "string", "enum", names));
+            }
+
+            if (schemaClass.isArray()) {
+                Class componentType = schemaClass.getComponentType();
+                JSONObject object = JSONObject.of("type", "array");
+                ArraySchema arraySchema = new ArraySchema(object, root);
+                arraySchema.itemSchema = of(componentType, root == null ? arraySchema : root);
+                return arraySchema;
+            }
+
+            if (Map.class.isAssignableFrom(schemaClass)) {
+                return new ObjectSchema(JSONObject.of("type", "object"), root);
+            }
+
+            if (Collection.class.isAssignableFrom(schemaClass)) {
+                return new ArraySchema(JSONObject.of("type", "array"), root);
+            }
+        }
+
+        ObjectReader reader = JSONFactory.getDefaultObjectReaderProvider().getObjectReader(type);
+
+        if (reader instanceof ObjectReaderBean) {
+            ObjectReaderAdapter adapter = (ObjectReaderAdapter) reader;
+
+            JSONArray required = new JSONArray();
+            adapter.apply((Consumer<FieldReader>) e -> {
+                if (e.fieldClass.isPrimitive()) {
+                    required.add(e.fieldName);
+                }
+            });
+
+            JSONObject object = JSONObject.of("type", "object", "required", required);
+            ObjectSchema schema = new ObjectSchema(object);
+            adapter.apply((Consumer<FieldReader>) e -> {
+                schema.properties.put(
+                        e.fieldName,
+                        of(e.fieldType, root == null ? schema : root)
+                );
+            });
+
+            return schema;
+        }
+
+        throw new JSONException("TODO : " + type);
     }
 
     @JSONCreator
@@ -239,7 +451,7 @@ public abstract class JSONSchema {
                             refName = URLDecoder.decode(refName);
                             JSONSchema refSchema = defs.get(refName);
                             if (refSchema == null) {
-                                refSchema = Any.NOT_ANY;
+                                refSchema = new UnresolvedReference(refName);
                             }
                             return refSchema;
                         }
@@ -613,6 +825,35 @@ public abstract class JSONSchema {
         throw new JSONSchemaValidException(result.getMessage());
     }
 
+    @Override
+    public String toString() {
+        return toJSONObject()
+                .toString();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        JSONSchema that = (JSONSchema) o;
+        JSONObject thisObj = this.toJSONObject();
+        JSONObject thatObj = that.toJSONObject();
+        return thisObj.equals(thatObj);
+    }
+
+    @Override
+    public int hashCode() {
+        return toJSONObject().hashCode();
+    }
+
+    public JSONObject toJSONObject() {
+        return new JSONObject();
+    }
+
     public enum Type {
         Null,
         Boolean,
@@ -628,7 +869,8 @@ public abstract class JSONSchema {
         OneOf,
         AllOf,
         AnyOf,
-        Any;
+        Any,
+        UnresolvedReference;
 
         public static Type of(String typeStr) {
             if (typeStr == null) {
@@ -674,4 +916,21 @@ public abstract class JSONSchema {
     static final ValidateResult CONTAINS_NOT_MATCH = new ValidateResult(false, "contains not match");
     static final ValidateResult UNIQUE_ITEMS_NOT_MATCH = new ValidateResult(false, "uniqueItems not match");
     static final ValidateResult REQUIRED_NOT_MATCH = new ValidateResult(false, "required");
+
+    static class JSONSchemaWriter
+            implements ObjectWriter {
+        @Override
+        public void write(JSONWriter jsonWriter,
+                          Object object,
+                          Object fieldName,
+                          java.lang.reflect.Type fieldType,
+                          long features) {
+            JSONObject jsonObject = ((JSONSchema) object).toJSONObject();
+            jsonWriter.write(jsonObject);
+        }
+    }
+
+    public void accept(Predicate<JSONSchema> v) {
+        v.test(this);
+    }
 }

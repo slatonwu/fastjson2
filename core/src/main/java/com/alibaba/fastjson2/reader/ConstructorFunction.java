@@ -7,10 +7,7 @@ import com.alibaba.fastjson2.internal.asm.ASMUtils;
 import com.alibaba.fastjson2.util.Fnv;
 import com.alibaba.fastjson2.util.TypeUtils;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Parameter;
-import java.lang.reflect.Type;
+import java.lang.reflect.*;
 import java.util.*;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -24,7 +21,7 @@ final class ConstructorFunction<T>
 
     final Parameter[] parameters;
     final String[] paramNames;
-    final boolean kotlinMaker;
+    final boolean marker;
     final long[] hashCodes;
     final List<Constructor> alternateConstructors;
     Map<Set<Long>, Constructor> alternateConstructorMap;
@@ -40,10 +37,10 @@ final class ConstructorFunction<T>
             Constructor markerConstructor,
             String... paramNames
     ) {
-        this.kotlinMaker = markerConstructor != null;
         this.function = function;
         this.biFunction = biFunction;
-        this.constructor = kotlinMaker ? markerConstructor : constructor;
+        this.marker = markerConstructor != null;
+        this.constructor = marker ? markerConstructor : constructor;
         this.parameters = constructor.getParameters();
         this.paramNames = paramNames;
         this.hashCodes = new long[parameters.length];
@@ -62,11 +59,12 @@ final class ConstructorFunction<T>
 
         this.alternateConstructors = alternateConstructors;
         if (alternateConstructors != null) {
-            alternateConstructorMap = new HashMap<>(alternateConstructors.size());
-            alternateConstructorNames = new HashMap<>(alternateConstructors.size());
-            alternateConstructorArgTypes = new HashMap<>(alternateConstructors.size());
-            alternateConstructorNameHashCodes = new HashMap<>(alternateConstructors.size());
-            for (int i = 0; i < alternateConstructors.size(); i++) {
+            final int size = alternateConstructors.size();
+            alternateConstructorMap = new HashMap<>(size, 1F);
+            alternateConstructorNames = new HashMap<>(size, 1F);
+            alternateConstructorArgTypes = new HashMap<>(size, 1F);
+            alternateConstructorNameHashCodes = new HashMap<>(size, 1F);
+            for (int i = 0; i < size; i++) {
                 Constructor alternateConstructor = alternateConstructors.get(i);
                 alternateConstructor.setAccessible(true);
 
@@ -179,7 +177,7 @@ final class ConstructorFunction<T>
         final int size = parameters.length;
         Object[] args = new Object[constructor.getParameterCount()];
 
-        if (kotlinMaker) {
+        if (marker) {
             int i = 0, flag = 0;
             for (int n; i < size; i = n) {
                 Object arg = values.get(hashCodes[i]);
@@ -200,12 +198,16 @@ final class ConstructorFunction<T>
             }
         } else {
             for (int i = 0; i < size; i++) {
-                Class<?> paramType = parameters[i].getType();
+                Parameter parameter = parameters[i];
+                Class<?> paramClass = parameter.getType();
+                Type paramType = parameter.getParameterizedType();
                 Object arg = values.get(hashCodes[i]);
                 if (arg == null) {
-                    arg = TypeUtils.getDefaultValue(paramType);
+                    arg = TypeUtils.getDefaultValue(paramClass);
                 } else {
-                    if (!paramType.isInstance(arg)) {
+                    if (!paramClass.isInstance(arg)) {
+                        arg = TypeUtils.cast(arg, paramClass);
+                    } else if (paramType instanceof ParameterizedType) {
                         arg = TypeUtils.cast(arg, paramType);
                     }
                 }

@@ -11,9 +11,11 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.zone.ZoneRules;
 import java.util.Date;
+import java.util.Locale;
 import java.util.TimeZone;
 
 import static com.alibaba.fastjson2.util.DateUtils.DateTimeFormatPattern.*;
+import static com.alibaba.fastjson2.util.IOUtils.*;
 import static com.alibaba.fastjson2.util.JDKUtils.*;
 import static java.time.ZoneOffset.UTC;
 
@@ -27,6 +29,7 @@ public class DateUtils {
     public static final ZoneRules SHANGHAI_ZONE_RULES = SHANGHAI_ZONE_ID.getRules();
     public static final String OFFSET_8_ZONE_ID_NAME = "+08:00";
     public static final ZoneId OFFSET_8_ZONE_ID = ZoneId.of(OFFSET_8_ZONE_ID_NAME);
+    public static final LocalDate LOCAL_DATE_19700101 = LocalDate.of(1970, 1, 1);
 
     static DateTimeFormatter DATE_TIME_FORMATTER_34;
     static DateTimeFormatter DATE_TIME_FORMATTER_COOKIE;
@@ -240,6 +243,10 @@ public class DateUtils {
                 String input = new String(str, off, len);
                 throw new DateTimeParseException("illegal input " + input, input, 0);
             case 8: {
+                if (str[2] == ':' && str[5] == ':') {
+                    LocalTime localTime = parseLocalTime8(str, off);
+                    return LocalDateTime.of(LOCAL_DATE_19700101, localTime);
+                }
                 LocalDate localDate = parseLocalDate8(str, off);
                 if (localDate == null) {
                     return null;
@@ -375,55 +382,16 @@ public class DateUtils {
             return null;
         }
 
-        byte c0 = bytes[off];
-        byte c1 = bytes[off + 1];
-        byte c2 = bytes[off + 2];
-        byte c3 = bytes[off + 3];
-        byte c4 = bytes[off + 4];
-        byte c5 = bytes[off + 5];
-        byte c6 = bytes[off + 6];
-        byte c7 = bytes[off + 7];
+        char c0 = (char) bytes[off];
+        char c1 = (char) bytes[off + 1];
+        char c2 = (char) bytes[off + 2];
+        char c3 = (char) bytes[off + 3];
+        char c4 = (char) bytes[off + 4];
+        char c5 = (char) bytes[off + 5];
+        char c6 = (char) bytes[off + 6];
+        char c7 = (char) bytes[off + 7];
 
-        byte h0, h1, i0, i1, s0, s1;
-        if (c2 == ':' && c5 == ':') {
-            h0 = c0;
-            h1 = c1;
-            i0 = c3;
-            i1 = c4;
-            s0 = c6;
-            s1 = c7;
-        } else {
-            return null;
-        }
-
-        int hour;
-        if (h0 >= '0' && h0 <= '9'
-                && h1 >= '0' && h1 <= '9'
-        ) {
-            hour = (h0 - '0') * 10 + (h1 - '0');
-        } else {
-            return null;
-        }
-
-        int minute;
-        if (i0 >= '0' && i0 <= '9'
-                && i1 >= '0' && i1 <= '9'
-        ) {
-            minute = (i0 - '0') * 10 + (i1 - '0');
-        } else {
-            return null;
-        }
-
-        int second;
-        if (s0 >= '0' && s0 <= '9'
-                && s1 >= '0' && s1 <= '9'
-        ) {
-            second = (s0 - '0') * 10 + (s1 - '0');
-        } else {
-            return null;
-        }
-
-        return LocalTime.of(hour, minute, second);
+        return parseLocalTime(c0, c1, c2, c3, c4, c5, c6, c7);
     }
 
     public static LocalTime parseLocalTime8(char[] bytes, int off) {
@@ -440,6 +408,19 @@ public class DateUtils {
         char c6 = bytes[off + 6];
         char c7 = bytes[off + 7];
 
+        return parseLocalTime(c0, c1, c2, c3, c4, c5, c6, c7);
+    }
+
+    public static LocalTime parseLocalTime(
+            char c0,
+            char c1,
+            char c2,
+            char c3,
+            char c4,
+            char c5,
+            char c6,
+            char c7
+    ) {
         char h0, h1, i0, i1, s0, s1;
         if (c2 == ':' && c5 == ':') {
             h0 = c0;
@@ -1432,6 +1413,7 @@ public class DateUtils {
         } else {
             char last = chars[len - 1];
             if (last == 'Z') {
+                len--;
                 zoneId = UTC;
             }
             LocalDateTime ldt = DateUtils.parseLocalDateTime(chars, off, len);
@@ -6927,14 +6909,14 @@ public class DateUtils {
         } else if (len == 34) {
             DateTimeFormatter formatter = DATE_TIME_FORMATTER_34;
             if (formatter == null) {
-                formatter = DATE_TIME_FORMATTER_34 = DateTimeFormatter.ofPattern("EEE MMM dd HH:mm:ss O yyyy");
+                formatter = DATE_TIME_FORMATTER_34 = DateTimeFormatter.ofPattern("EEE MMM dd HH:mm:ss O yyyy", Locale.ENGLISH);
             }
             return ZonedDateTime.parse(new String(str, off, len), formatter);
         } else if (len == 31 && str[off + 3] == ',') {
             DateTimeFormatter formatter;
             formatter = DATE_TIME_FORMATTER_RFC_2822;
             if (formatter == null) {
-                formatter = DATE_TIME_FORMATTER_RFC_2822 = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss Z");
+                formatter = DATE_TIME_FORMATTER_RFC_2822 = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss Z", Locale.ENGLISH);
             }
             return ZonedDateTime.parse(new String(str, off, len), formatter);
         } else {
@@ -7960,14 +7942,14 @@ public class DateUtils {
         } else if (len == 34) {
             DateTimeFormatter formatter = DATE_TIME_FORMATTER_34;
             if (formatter == null) {
-                formatter = DATE_TIME_FORMATTER_34 = DateTimeFormatter.ofPattern("EEE MMM dd HH:mm:ss O yyyy");
+                formatter = DATE_TIME_FORMATTER_34 = DateTimeFormatter.ofPattern("EEE MMM dd HH:mm:ss O yyyy", Locale.ENGLISH);
             }
             return ZonedDateTime.parse(new String(str, off, len), formatter);
         } else if (len == 31 && str[off + 3] == ',') {
             DateTimeFormatter formatter;
             formatter = DATE_TIME_FORMATTER_RFC_2822;
             if (formatter == null) {
-                formatter = DATE_TIME_FORMATTER_RFC_2822 = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss Z");
+                formatter = DATE_TIME_FORMATTER_RFC_2822 = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss Z", Locale.ENGLISH);
             }
             return ZonedDateTime.parse(new String(str, off, len), formatter);
         } else {
@@ -8046,7 +8028,7 @@ public class DateUtils {
         if (str.endsWith(" CST")) {
             DateTimeFormatter formatter = DATE_TIME_FORMATTER_COOKIE_LOCAL;
             if (formatter == null) {
-                formatter = DateTimeFormatter.ofPattern("EEEE, dd-MMM-yyyy HH:mm:ss");
+                formatter = DateTimeFormatter.ofPattern("EEEE, dd-MMM-yyyy HH:mm:ss", Locale.ENGLISH);
                 DATE_TIME_FORMATTER_COOKIE_LOCAL = formatter;
             }
             String strLocalDateTime = str.substring(0, str.length() - 4);
@@ -8056,7 +8038,7 @@ public class DateUtils {
 
         DateTimeFormatter formatter = DATE_TIME_FORMATTER_COOKIE;
         if (formatter == null) {
-            formatter = DateTimeFormatter.ofPattern("EEEE, dd-MMM-yyyy HH:mm:ss zzz");
+            formatter = DateTimeFormatter.ofPattern("EEEE, dd-MMM-yyyy HH:mm:ss zzz", Locale.ENGLISH);
             DATE_TIME_FORMATTER_COOKIE = formatter;
         }
         return ZonedDateTime.parse(str, formatter);
@@ -10401,66 +10383,18 @@ public class DateUtils {
             second = (int) secondOfDay;
         }
 
-        int y0 = year / 1000 + '0';
-        int y1 = (year / 100) % 10 + '0';
-        int y2 = (year / 10) % 10 + '0';
-        int y3 = year % 10 + '0';
-        int m0 = month / 10 + '0';
-        int m1 = month % 10 + '0';
-        int d0 = dayOfMonth / 10 + '0';
-        int d1 = dayOfMonth % 10 + '0';
-        int h0 = hour / 10 + '0';
-        int h1 = hour % 10 + '0';
-        int i0 = minute / 10 + '0';
-        int i1 = minute % 10 + '0';
-        int s0 = second / 10 + '0';
-        int s1 = second % 10 + '0';
-
         if (STRING_CREATOR_JDK11 != null) {
             byte[] bytes = new byte[19];
-            bytes[0] = (byte) y0;
-            bytes[1] = (byte) y1;
-            bytes[2] = (byte) y2;
-            bytes[3] = (byte) y3;
-            bytes[4] = '-';
-            bytes[5] = (byte) m0;
-            bytes[6] = (byte) m1;
-            bytes[7] = '-';
-            bytes[8] = (byte) d0;
-            bytes[9] = (byte) d1;
+            IOUtils.writeLocalDate(bytes, 0, year, month, dayOfMonth);
             bytes[10] = ' ';
-            bytes[11] = (byte) h0;
-            bytes[12] = (byte) h1;
-            bytes[13] = ':';
-            bytes[14] = (byte) i0;
-            bytes[15] = (byte) i1;
-            bytes[16] = ':';
-            bytes[17] = (byte) s0;
-            bytes[18] = (byte) s1;
-
+            IOUtils.writeLocalTime(bytes, 11, hour, minute, second);
             return STRING_CREATOR_JDK11.apply(bytes, LATIN1);
         }
 
         char[] chars = new char[19];
-        chars[0] = (char) y0;
-        chars[1] = (char) y1;
-        chars[2] = (char) y2;
-        chars[3] = (char) y3;
-        chars[4] = '-';
-        chars[5] = (char) m0;
-        chars[6] = (char) m1;
-        chars[7] = '-';
-        chars[8] = (char) d0;
-        chars[9] = (char) d1;
+        IOUtils.writeLocalDate(chars, 0, year, month, dayOfMonth);
         chars[10] = ' ';
-        chars[11] = (char) h0;
-        chars[12] = (char) h1;
-        chars[13] = ':';
-        chars[14] = (char) i0;
-        chars[15] = (char) i1;
-        chars[16] = ':';
-        chars[17] = (char) s0;
-        chars[18] = (char) s1;
+        IOUtils.writeLocalTime(chars, 11, hour, minute, second);
 
         if (STRING_CREATOR_JDK8 != null) {
             return STRING_CREATOR_JDK8.apply(chars, Boolean.TRUE);
@@ -10544,39 +10478,24 @@ public class DateUtils {
 
             year = (int) yearEst;
         }
-        int y0 = year / 1000 + '0';
-        int y1 = (year / 100) % 10 + '0';
-        int y2 = (year / 10) % 10 + '0';
-        int y3 = year % 10 + '0';
-        int m0 = month / 10 + '0';
-        int m1 = month % 10 + '0';
-        int d0 = dayOfMonth / 10 + '0';
-        int d1 = dayOfMonth % 10 + '0';
+
+        int y01 = year / 100;
+        int y23 = year - y01 * 100;
 
         String str;
         if (STRING_CREATOR_JDK11 != null) {
             byte[] bytes = new byte[8];
-            bytes[0] = (byte) y0;
-            bytes[1] = (byte) y1;
-            bytes[2] = (byte) y2;
-            bytes[3] = (byte) y3;
-            bytes[4] = (byte) m0;
-            bytes[5] = (byte) m1;
-            bytes[6] = (byte) d0;
-            bytes[7] = (byte) d1;
-
+            UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET, PACKED_DIGITS[y01]);
+            UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 2, PACKED_DIGITS[y23]);
+            UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 4, PACKED_DIGITS[month]);
+            UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 6, PACKED_DIGITS[dayOfMonth]);
             str = STRING_CREATOR_JDK11.apply(bytes, LATIN1);
         } else {
             char[] chars = new char[8];
-            chars[0] = (char) y0;
-            chars[1] = (char) y1;
-            chars[2] = (char) y2;
-            chars[3] = (char) y3;
-            chars[4] = (char) m0;
-            chars[5] = (char) m1;
-            chars[6] = (char) d0;
-            chars[7] = (char) d1;
-
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET, PACKED_DIGITS_UTF16[y01]);
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 4, PACKED_DIGITS_UTF16[y23]);
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 8, PACKED_DIGITS_UTF16[month]);
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 12, PACKED_DIGITS_UTF16[dayOfMonth]);
             if (STRING_CREATOR_JDK8 != null) {
                 str = STRING_CREATOR_JDK8.apply(chars, Boolean.TRUE);
             } else {
@@ -10591,62 +10510,27 @@ public class DateUtils {
         return str;
     }
 
+    public static String formatYMD10(int year, int month, int dayOfMonth) {
+        if (STRING_CREATOR_JDK11 != null) {
+            byte[] bytes = new byte[10];
+            IOUtils.writeLocalDate(bytes, 0, year, month, dayOfMonth);
+            return STRING_CREATOR_JDK11.apply(bytes, LATIN1);
+        }
+
+        char[] chars = new char[10];
+        IOUtils.writeLocalDate(chars, 0, year, month, dayOfMonth);
+        if (STRING_CREATOR_JDK8 != null) {
+            return STRING_CREATOR_JDK8.apply(chars, Boolean.TRUE);
+        }
+        return new String(chars);
+    }
+
     public static String formatYMD10(LocalDate date) {
         if (date == null) {
             return null;
         }
 
-        int year = date.getYear();
-        int month = date.getMonthValue();
-        int dayOfMonth = date.getDayOfMonth();
-
-        int y0 = year / 1000 + '0';
-        int y1 = (year / 100) % 10 + '0';
-        int y2 = (year / 10) % 10 + '0';
-        int y3 = year % 10 + '0';
-        int m0 = month / 10 + '0';
-        int m1 = month % 10 + '0';
-        int d0 = dayOfMonth / 10 + '0';
-        int d1 = dayOfMonth % 10 + '0';
-
-        final char separator = '-';
-
-        String str;
-        if (STRING_CREATOR_JDK11 != null) {
-            byte[] bytes = new byte[10];
-            bytes[0] = (byte) y0;
-            bytes[1] = (byte) y1;
-            bytes[2] = (byte) y2;
-            bytes[3] = (byte) y3;
-            bytes[4] = separator;
-            bytes[5] = (byte) m0;
-            bytes[6] = (byte) m1;
-            bytes[7] = separator;
-            bytes[8] = (byte) d0;
-            bytes[9] = (byte) d1;
-
-            str = STRING_CREATOR_JDK11.apply(bytes, LATIN1);
-        } else {
-            char[] chars = new char[10];
-            chars[0] = (char) y0;
-            chars[1] = (char) y1;
-            chars[2] = (char) y2;
-            chars[3] = (char) y3;
-            chars[4] = separator;
-            chars[5] = (char) m0;
-            chars[6] = (char) m1;
-            chars[7] = separator;
-            chars[8] = (char) d0;
-            chars[9] = (char) d1;
-
-            if (STRING_CREATOR_JDK8 != null) {
-                str = STRING_CREATOR_JDK8.apply(chars, Boolean.TRUE);
-            } else {
-                str = new String(chars);
-            }
-        }
-
-        return str;
+        return formatYMD10(date.getYear(), date.getMonthValue(), date.getDayOfMonth());
     }
 
     public static String formatYMD10(Date date) {
@@ -10666,39 +10550,23 @@ public class DateUtils {
         int month = date.getMonthValue();
         int dayOfMonth = date.getDayOfMonth();
 
-        int y0 = year / 1000 + '0';
-        int y1 = (year / 100) % 10 + '0';
-        int y2 = (year / 10) % 10 + '0';
-        int y3 = year % 10 + '0';
-        int m0 = month / 10 + '0';
-        int m1 = month % 10 + '0';
-        int d0 = dayOfMonth / 10 + '0';
-        int d1 = dayOfMonth % 10 + '0';
+        int y01 = year / 100;
+        int y23 = year - y01 * 100;
 
         String str;
         if (STRING_CREATOR_JDK11 != null) {
             byte[] bytes = new byte[8];
-            bytes[0] = (byte) y0;
-            bytes[1] = (byte) y1;
-            bytes[2] = (byte) y2;
-            bytes[3] = (byte) y3;
-            bytes[4] = (byte) m0;
-            bytes[5] = (byte) m1;
-            bytes[6] = (byte) d0;
-            bytes[7] = (byte) d1;
-
+            UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET, PACKED_DIGITS[y01]);
+            UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 2, PACKED_DIGITS[y23]);
+            UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 4, PACKED_DIGITS[month]);
+            UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 6, PACKED_DIGITS[dayOfMonth]);
             str = STRING_CREATOR_JDK11.apply(bytes, LATIN1);
         } else {
             char[] chars = new char[8];
-            chars[0] = (char) y0;
-            chars[1] = (char) y1;
-            chars[2] = (char) y2;
-            chars[3] = (char) y3;
-            chars[4] = (char) m0;
-            chars[5] = (char) m1;
-            chars[6] = (char) d0;
-            chars[7] = (char) d1;
-
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET, PACKED_DIGITS_UTF16[y01]);
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 4, PACKED_DIGITS_UTF16[y23]);
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 8, PACKED_DIGITS_UTF16[month]);
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 12, PACKED_DIGITS_UTF16[dayOfMonth]);
             if (STRING_CREATOR_JDK8 != null) {
                 str = STRING_CREATOR_JDK8.apply(chars, Boolean.TRUE);
             } else {
@@ -10775,45 +10643,15 @@ public class DateUtils {
 
             year = (int) yearEst;
         }
-        int y0 = year / 1000 + '0';
-        int y1 = (year / 100) % 10 + '0';
-        int y2 = (year / 10) % 10 + '0';
-        int y3 = year % 10 + '0';
-        int m0 = month / 10 + '0';
-        int m1 = month % 10 + '0';
-        int d0 = dayOfMonth / 10 + '0';
-        int d1 = dayOfMonth % 10 + '0';
-
-        final char separator = '-';
 
         String str;
         if (STRING_CREATOR_JDK11 != null) {
             byte[] bytes = new byte[10];
-            bytes[0] = (byte) y0;
-            bytes[1] = (byte) y1;
-            bytes[2] = (byte) y2;
-            bytes[3] = (byte) y3;
-            bytes[4] = separator;
-            bytes[5] = (byte) m0;
-            bytes[6] = (byte) m1;
-            bytes[7] = separator;
-            bytes[8] = (byte) d0;
-            bytes[9] = (byte) d1;
-
+            IOUtils.writeLocalDate(bytes, 0, year, month, dayOfMonth);
             str = STRING_CREATOR_JDK11.apply(bytes, LATIN1);
         } else {
             char[] chars = new char[10];
-            chars[0] = (char) y0;
-            chars[1] = (char) y1;
-            chars[2] = (char) y2;
-            chars[3] = (char) y3;
-            chars[4] = separator;
-            chars[5] = (char) m0;
-            chars[6] = (char) m1;
-            chars[7] = separator;
-            chars[8] = (char) d0;
-            chars[9] = (char) d1;
-
+            IOUtils.writeLocalDate(chars, 0, year, month, dayOfMonth);
             if (STRING_CREATOR_JDK8 != null) {
                 str = STRING_CREATOR_JDK8.apply(chars, Boolean.TRUE);
             } else {
@@ -10930,7 +10768,23 @@ public class DateUtils {
         int hour = ldt.getHour();
         int minute = ldt.getMinute();
         int second = ldt.getSecond();
-        return format(year, month, dayOfMonth, hour, minute, second, DATE_TIME_FORMAT_19_DASH);
+
+        if (STRING_CREATOR_JDK11 != null) {
+            byte[] bytes = new byte[19];
+            IOUtils.writeLocalDate(bytes, 0, year, month, dayOfMonth);
+            bytes[10] = ' ';
+            IOUtils.writeLocalTime(bytes, 11, hour, minute, second);
+            return STRING_CREATOR_JDK11.apply(bytes, LATIN1);
+        }
+
+        char[] chars = new char[19];
+        IOUtils.writeLocalDate(chars, 0, year, month, dayOfMonth);
+        chars[10] = ' ';
+        IOUtils.writeLocalTime(chars, 11, hour, minute, second);
+        if (STRING_CREATOR_JDK8 != null) {
+            return STRING_CREATOR_JDK8.apply(chars, Boolean.TRUE);
+        }
+        return new String(chars);
     }
 
     public static String format(LocalDateTime ldt, String format) {
@@ -10957,7 +10811,7 @@ public class DateUtils {
                 return format(year, month, dayOfMonth, hour, minute, second, DATE_TIME_FORMAT_19_DASH_T);
             }
             case "yyyy-MM-dd":
-                return format(year, month, dayOfMonth, DATE_FORMAT_10_DASH);
+                return formatYMD10(year, month, dayOfMonth);
             case "yyyy/MM/dd":
                 return format(year, month, dayOfMonth, DATE_FORMAT_10_SLASH);
             case "dd.MM.yyyy":
@@ -10978,7 +10832,23 @@ public class DateUtils {
         int year = localDate.getYear();
         int month = localDate.getMonthValue();
         int dayOfMonth = localDate.getDayOfMonth();
-        return format(year, month, dayOfMonth, 0, 0, 0, DATE_TIME_FORMAT_19_DASH);
+
+        if (STRING_CREATOR_JDK11 != null) {
+            byte[] bytes = new byte[19];
+            IOUtils.writeLocalDate(bytes, 0, year, month, dayOfMonth);
+            bytes[10] = ' ';
+            IOUtils.writeLocalTime(bytes, 11, 0, 0, 0);
+            return STRING_CREATOR_JDK11.apply(bytes, LATIN1);
+        }
+
+        char[] chars = new char[19];
+        IOUtils.writeLocalDate(chars, 0, year, month, dayOfMonth);
+        chars[10] = ' ';
+        IOUtils.writeLocalTime(chars, 11, 0, 0, 0);
+        if (STRING_CREATOR_JDK8 != null) {
+            return STRING_CREATOR_JDK8.apply(chars, Boolean.TRUE);
+        }
+        return new String(chars);
     }
 
     public static String format(LocalDate localDate, String format) {
@@ -11022,40 +10892,26 @@ public class DateUtils {
             int dayOfMonth,
             DateTimeFormatPattern pattern
     ) {
-        int y0 = year / 1000 + '0';
-        int y1 = (year / 100) % 10 + '0';
-        int y2 = (year / 10) % 10 + '0';
-        int y3 = year % 10 + '0';
-        int m0 = month / 10 + '0';
-        int m1 = month % 10 + '0';
-        int d0 = dayOfMonth / 10 + '0';
-        int d1 = dayOfMonth % 10 + '0';
+        int y01 = year / 100;
+        int y23 = year - y01 * 100;
 
         if (STRING_CREATOR_JDK11 != null) {
             byte[] bytes = new byte[10];
             if (pattern == DATE_FORMAT_10_DOT) {
-                bytes[0] = (byte) d0;
-                bytes[1] = (byte) d1;
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET, PACKED_DIGITS[dayOfMonth]);
                 bytes[2] = '.';
-                bytes[3] = (byte) m0;
-                bytes[4] = (byte) m1;
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 3, PACKED_DIGITS[month]);
                 bytes[5] = '.';
-                bytes[6] = (byte) y0;
-                bytes[7] = (byte) y1;
-                bytes[8] = (byte) y2;
-                bytes[9] = (byte) y3;
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 6, PACKED_DIGITS[y01]);
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 8, PACKED_DIGITS[y23]);
             } else {
                 byte separator = (byte) (pattern == DATE_FORMAT_10_DASH ? '-' : '/');
-                bytes[0] = (byte) y0;
-                bytes[1] = (byte) y1;
-                bytes[2] = (byte) y2;
-                bytes[3] = (byte) y3;
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET, PACKED_DIGITS[y01]);
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 2, PACKED_DIGITS[y23]);
                 bytes[4] = separator;
-                bytes[5] = (byte) m0;
-                bytes[6] = (byte) m1;
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 5, PACKED_DIGITS[month]);
                 bytes[7] = separator;
-                bytes[8] = (byte) d0;
-                bytes[9] = (byte) d1;
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 8, PACKED_DIGITS[dayOfMonth]);
             }
 
             return STRING_CREATOR_JDK11.apply(bytes, LATIN1);
@@ -11063,28 +10919,20 @@ public class DateUtils {
 
         char[] chars = new char[10];
         if (pattern == DATE_FORMAT_10_DOT) {
-            chars[0] = (char) d0;
-            chars[1] = (char) d1;
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET, PACKED_DIGITS_UTF16[dayOfMonth]);
             chars[2] = '.';
-            chars[3] = (char) m0;
-            chars[4] = (char) m1;
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 6, PACKED_DIGITS_UTF16[month]);
             chars[5] = '.';
-            chars[6] = (char) y0;
-            chars[7] = (char) y1;
-            chars[8] = (char) y2;
-            chars[9] = (char) y3;
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 12, PACKED_DIGITS_UTF16[y01]);
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 16, PACKED_DIGITS_UTF16[y23]);
         } else {
             char separator = (pattern == DATE_FORMAT_10_DASH ? '-' : '/');
-            chars[0] = (char) y0;
-            chars[1] = (char) y1;
-            chars[2] = (char) y2;
-            chars[3] = (char) y3;
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET, PACKED_DIGITS_UTF16[y01]);
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 4, PACKED_DIGITS_UTF16[y23]);
             chars[4] = separator;
-            chars[5] = (char) m0;
-            chars[6] = (char) m1;
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 10, PACKED_DIGITS_UTF16[month]);
             chars[7] = separator;
-            chars[8] = (char) d0;
-            chars[9] = (char) d1;
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 16, PACKED_DIGITS_UTF16[dayOfMonth]);
         }
 
         if (STRING_CREATOR_JDK8 != null) {
@@ -11207,103 +11055,59 @@ public class DateUtils {
             int second,
             DateTimeFormatPattern pattern
     ) {
-        int y0 = year / 1000 + '0';
-        int y1 = (year / 100) % 10 + '0';
-        int y2 = (year / 10) % 10 + '0';
-        int y3 = year % 10 + '0';
-        int m0 = month / 10 + '0';
-        int m1 = month % 10 + '0';
-        int d0 = dayOfMonth / 10 + '0';
-        int d1 = dayOfMonth % 10 + '0';
-        int h0 = hour / 10 + '0';
-        int h1 = hour % 10 + '0';
-        int i0 = minute / 10 + '0';
-        int i1 = minute % 10 + '0';
-        int s0 = second / 10 + '0';
-        int s1 = second % 10 + '0';
+        int y01 = year / 100;
+        int y23 = year - y01 * 100;
 
         if (STRING_CREATOR_JDK11 != null) {
             byte[] bytes = new byte[19];
             if (pattern == DATE_TIME_FORMAT_19_DOT) {
-                bytes[0] = (byte) d0;
-                bytes[1] = (byte) d1;
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET, PACKED_DIGITS[dayOfMonth]);
                 bytes[2] = '.';
-                bytes[3] = (byte) m0;
-                bytes[4] = (byte) m1;
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 3, PACKED_DIGITS[month]);
                 bytes[5] = '.';
-                bytes[6] = (byte) y0;
-                bytes[7] = (byte) y1;
-                bytes[8] = (byte) y2;
-                bytes[9] = (byte) y3;
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 6, PACKED_DIGITS[y01]);
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 8, PACKED_DIGITS[y23]);
                 bytes[10] = (byte) ' ';
             } else {
                 char separator = pattern == DATE_TIME_FORMAT_19_DASH ? ' ' : 'T';
-                char dateSeparator = pattern == DATE_TIME_FORMAT_19_SLASH ? '/' : '-';
-                bytes[0] = (byte) y0;
-                bytes[1] = (byte) y1;
-                bytes[2] = (byte) y2;
-                bytes[3] = (byte) y3;
-                bytes[4] = (byte) dateSeparator;
-                bytes[5] = (byte) m0;
-                bytes[6] = (byte) m1;
-                bytes[7] = (byte) dateSeparator;
-                bytes[8] = (byte) d0;
-                bytes[9] = (byte) d1;
+                byte dateSeparator = (byte) (pattern == DATE_TIME_FORMAT_19_SLASH ? '/' : '-');
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET, PACKED_DIGITS[y01]);
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 2, PACKED_DIGITS[y23]);
+                bytes[4] = dateSeparator;
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 5, PACKED_DIGITS[month]);
+                bytes[7] = dateSeparator;
+                UNSAFE.putShort(bytes, ARRAY_BYTE_BASE_OFFSET + 8, PACKED_DIGITS[dayOfMonth]);
                 bytes[10] = (byte) separator;
             }
-            bytes[11] = (byte) h0;
-            bytes[12] = (byte) h1;
-            bytes[13] = ':';
-            bytes[14] = (byte) i0;
-            bytes[15] = (byte) i1;
-            bytes[16] = ':';
-            bytes[17] = (byte) s0;
-            bytes[18] = (byte) s1;
+            IOUtils.writeLocalTime(bytes, 11, hour, minute, second);
 
             return STRING_CREATOR_JDK11.apply(bytes, LATIN1);
         }
 
         char[] chars = new char[19];
         if (pattern == DATE_TIME_FORMAT_19_DOT) {
-            chars[0] = (char) d0;
-            chars[1] = (char) d1;
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET, PACKED_DIGITS_UTF16[dayOfMonth]);
             chars[2] = '.';
-            chars[3] = (char) m0;
-            chars[4] = (char) m1;
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 6, PACKED_DIGITS_UTF16[month]);
             chars[5] = '.';
-            chars[6] = (char) y0;
-            chars[7] = (char) y1;
-            chars[8] = (char) y2;
-            chars[9] = (char) y3;
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 12, PACKED_DIGITS_UTF16[y01]);
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 16, PACKED_DIGITS_UTF16[y23]);
             chars[10] = ' ';
         } else {
             char separator = pattern == DATE_TIME_FORMAT_19_DASH ? ' ' : 'T';
             char dateSeparator = pattern == DATE_TIME_FORMAT_19_SLASH ? '/' : '-';
-            chars[0] = (char) y0;
-            chars[1] = (char) y1;
-            chars[2] = (char) y2;
-            chars[3] = (char) y3;
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET, PACKED_DIGITS_UTF16[y01]);
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 4, PACKED_DIGITS_UTF16[y23]);
             chars[4] = dateSeparator;
-            chars[5] = (char) m0;
-            chars[6] = (char) m1;
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 10, PACKED_DIGITS_UTF16[month]);
             chars[7] = dateSeparator;
-            chars[8] = (char) d0;
-            chars[9] = (char) d1;
+            UNSAFE.putInt(chars, ARRAY_CHAR_BASE_OFFSET + 16, PACKED_DIGITS_UTF16[dayOfMonth]);
             chars[10] = separator;
         }
-        chars[11] = (char) h0;
-        chars[12] = (char) h1;
-        chars[13] = ':';
-        chars[14] = (char) i0;
-        chars[15] = (char) i1;
-        chars[16] = ':';
-        chars[17] = (char) s0;
-        chars[18] = (char) s1;
-
+        IOUtils.writeLocalTime(chars, 11, hour, minute, second);
         if (STRING_CREATOR_JDK8 != null) {
             return STRING_CREATOR_JDK8.apply(chars, Boolean.TRUE);
         }
-
         return new String(chars);
     }
 
@@ -11410,42 +11214,12 @@ public class DateUtils {
         }
 
         int len = 19 + millislen + zonelen;
-        int y0 = year / 1000 + '0';
-        int y1 = (year / 100) % 10 + '0';
-        int y2 = (year / 10) % 10 + '0';
-        int y3 = year % 10 + '0';
-        int m0 = month / 10 + '0';
-        int m1 = month % 10 + '0';
-        int d0 = dayOfMonth / 10 + '0';
-        int d1 = dayOfMonth % 10 + '0';
-        int h0 = hour / 10 + '0';
-        int h1 = hour % 10 + '0';
-        int i0 = minute / 10 + '0';
-        int i1 = minute % 10 + '0';
-        int s0 = second / 10 + '0';
-        int s1 = second % 10 + '0';
 
         if (STRING_CREATOR_JDK8 != null) {
             char[] chars = new char[len];
-            chars[0] = (char) y0;
-            chars[1] = (char) y1;
-            chars[2] = (char) y2;
-            chars[3] = (char) y3;
-            chars[4] = '-';
-            chars[5] = (char) m0;
-            chars[6] = (char) m1;
-            chars[7] = '-';
-            chars[8] = (char) d0;
-            chars[9] = (char) d1;
+            IOUtils.writeLocalDate(chars, 0, year, month, dayOfMonth);
             chars[10] = ' ';
-            chars[11] = (char) h0;
-            chars[12] = (char) h1;
-            chars[13] = ':';
-            chars[14] = (char) i0;
-            chars[15] = (char) i1;
-            chars[16] = ':';
-            chars[17] = (char) s0;
-            chars[18] = (char) s1;
+            IOUtils.writeLocalTime(chars, 11, hour, minute, second);
             if (millislen > 0) {
                 chars[19] = '.';
                 for (int i = 20; i < len; ++i) {
@@ -11491,25 +11265,9 @@ public class DateUtils {
         }
 
         byte[] bytes = new byte[len];
-        bytes[0] = (byte) y0;
-        bytes[1] = (byte) y1;
-        bytes[2] = (byte) y2;
-        bytes[3] = (byte) y3;
-        bytes[4] = '-';
-        bytes[5] = (byte) m0;
-        bytes[6] = (byte) m1;
-        bytes[7] = '-';
-        bytes[8] = (byte) d0;
-        bytes[9] = (byte) d1;
+        IOUtils.writeLocalDate(bytes, 0, year, month, dayOfMonth);
         bytes[10] = ' ';
-        bytes[11] = (byte) h0;
-        bytes[12] = (byte) h1;
-        bytes[13] = ':';
-        bytes[14] = (byte) i0;
-        bytes[15] = (byte) i1;
-        bytes[16] = ':';
-        bytes[17] = (byte) s0;
-        bytes[18] = (byte) s1;
+        IOUtils.writeLocalTime(bytes, 11, hour, minute, second);
         if (millislen > 0) {
             bytes[19] = '.';
             for (int i = 20; i < len; ++i) {
@@ -11842,7 +11600,7 @@ public class DateUtils {
                 int dom = 31;
                 switch (mm) {
                     case 2:
-                        boolean isLeapYear = ((yyyy & 3) == 0) && ((yyyy % 100) != 0 || (yyyy % 400) == 0);
+                        boolean isLeapYear = (yyyy & 15) == 0 ? (yyyy & 3) == 0 : (yyyy & 3) == 0 && yyyy % 100 != 0;
                         dom = isLeapYear ? 29 : 28;
                         break;
                     case 4:
@@ -11931,7 +11689,7 @@ public class DateUtils {
                 int dom = 31;
                 switch (mm) {
                     case 2:
-                        boolean isLeapYear = ((yyyy & 3) == 0) && ((yyyy % 100) != 0 || (yyyy % 400) == 0);
+                        boolean isLeapYear = (yyyy & 15) == 0 ? (yyyy & 3) == 0 : (yyyy & 3) == 0 && yyyy % 100 != 0;
                         dom = isLeapYear ? 29 : 28;
                         break;
                     case 4:

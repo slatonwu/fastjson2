@@ -10,9 +10,12 @@ If your project uses `kotlin`, you can use the` Fastjson-Kotlin` module, and use
 <dependency>
     <groupId>com.alibaba.fastjson2</groupId>
     <artifactId>fastjson2-kotlin</artifactId>
-    <version>2.0.34</version>
+    <version>2.0.43</version>
 </dependency>
 ```
+
+Add standard library(kotlin-stdlib) and reflection library(kotlin-reflect) as appropriate.
+If the data class is used or the parameters are passed in through constructor, then add reflection library.
 
 ```xml
 <dependency>
@@ -32,7 +35,7 @@ If your project uses `kotlin`, you can use the` Fastjson-Kotlin` module, and use
 
 ```kotlin
 dependencies {
-    implementation("com.alibaba.fastjson2:fastjson2-kotlin:2.0.34")
+    implementation("com.alibaba.fastjson2:fastjson2-kotlin:2.0.43")
 }
 ```
 

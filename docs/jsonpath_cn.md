@@ -22,7 +22,6 @@
 | [?(@.key in ('v0', 'v1'))]		     | IN过滤, 支持字符串和数值类型	例如: $.departs[?(@.name in ('wenshao','Yako'))] $.departs[id not in (101,102)] 	                            |
 | [?(@.key between 234 and 456)]		 | BETWEEN过滤, 支持数值类型，支持not between 例如: $.departs[?(@.id between 101 and 201)] <br/> $.departs[?(@.id not between 101 and 201)] |
 | length() 或者 size()		             | 数组长度。例如$.values.size() 支持类型java.util.Map和java.util.Collection和数组                                                            |
-| keySet()		                       | 获取Map的keySet或者对象的非空属性名称。例如$.val.keySet() 支持类型：Map和普通对象. 不支持：Collection和数组（返回null）                                           |
 | .		                              | 属性访问，例如$.name 	                                                                                                             |
 | ..		                             | deepScan属性访问，例如$..name 	                                                                                                    |
 | *		                              | 对象的所有属性，例如$.leader.*                                                                                                        |
@@ -45,7 +44,6 @@ $['store']['book'][0]['title']
 | length/size   | integer  | 返回集合或者字符串的长度     |
 | first         | Any      | 集合中第一个元素         |
 | last          | Any      | 集合中最后一个元素        |
-| keys / keySet | sequence | 返回Map类型的KeySet   |
 | values        | sequence | Map类型的Values     |
 | entries       | sequence | Map类型的EntrySet   |
 | trim          | string   | 对字符串做trim后返回     |
@@ -110,8 +108,6 @@ public void test_entity() throws Exception {
    
   assertSame(entity.getValue(), JSONPath.eval(entity, "$.value")); 
   assertTrue(JSONPath.contains(entity, "$.value"));
-  assertTrue(JSONPath.containsValue(entity, "$.id", 123));
-  assertTrue(JSONPath.containsValue(entity, "$.value", entity.getValue())); 
   assertEquals(2, JSONPath.size(entity, "$"));
   assertEquals(0, JSONPath.size(new Object[], "$")); 
 }
@@ -192,13 +188,11 @@ assertSame(entities.get(0), result.get(0));
 ```java
 Entity entity = new Entity(1001, "ljw2083");
 assertSame(entity , JSONPath.eval(entity, "[?(@.id = 1001)]"));
-assertNull(JSONPath.eval(entity, "[id = 1002]"));
 
 JSONPath.set(entity, "id", 123456); //将id字段修改为123456
 assertEquals(123456, entity.getId().intValue());
 
 JSONPath.set(entity, "value", new int[0]); //将value字段赋值为长度为0的数组
-JSONPath.arrayAdd(entity, "value", 1, 2, 3); //将value字段的数组添加元素1,2,3
 ```
 
 ### 3.7 例7
@@ -217,31 +211,4 @@ assertEquals(3, ids.size());
 assertEquals(1001, ids.get(0));
 assertEquals(1002, ids.get(1));
 assertEquals(1003, ids.get(2));
-```
-
-### 3.8 例8 keySet
-
-使用keySet抽取对象的属性名，null值属性的名字并不包含在keySet结果中，使用时需要注意，详细可参考示例。
-
-```java
-Entity e = new Entity();
-e.setId(null);
-e.setName("hello");
-Map<String, Entity> map = Collections.singletonMap("e", e);
-Collection<String> result;
-
-// id is null, excluded by keySet
-result = (Collection<String>)JSONPath.eval(map, "$.e.keySet()");
-assertEquals(1, result.size());
-assertTrue(result.contains("name"));
-
-e.setId(1L);
-result = (Collection<String>)JSONPath.eval(map, "$.e.keySet()");
-assertEquals(2, result.size());
-.assertTrue(result.contains("id")); // included
-assertTrue(result.contains("name"));
-
-// Same result
-assertEquals(result, JSONPath.keySet(map, "$.e"));
-assertEquals(result, new JSONPath("$.e").keySet(map));
 ```

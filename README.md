@@ -41,7 +41,7 @@
 <dependency>
     <groupId>com.alibaba.fastjson2</groupId>
     <artifactId>fastjson2</artifactId>
-    <version>2.0.34</version>
+    <version>2.0.43</version>
 </dependency>
 ```
 
@@ -49,7 +49,7 @@
 
 ```groovy
 dependencies {
-    implementation 'com.alibaba.fastjson2:fastjson2:2.0.34'
+    implementation 'com.alibaba.fastjson2:fastjson2:2.0.43'
 }
 ```
 
@@ -67,7 +67,7 @@ dependencies {
 <dependency>
     <groupId>com.alibaba</groupId>
     <artifactId>fastjson</artifactId>
-    <version>2.0.34</version>
+    <version>2.0.43</version>
 </dependency>
 ```
 
@@ -75,7 +75,7 @@ dependencies {
 
 ```groovy
 dependencies {
-    implementation 'com.alibaba:fastjson:2.0.34'
+    implementation 'com.alibaba:fastjson:2.0.43'
 }
 ```
 
@@ -89,9 +89,12 @@ dependencies {
 <dependency>
     <groupId>com.alibaba.fastjson2</groupId>
     <artifactId>fastjson2-kotlin</artifactId>
-    <version>2.0.34</version>
+    <version>2.0.43</version>
 </dependency>
 ```
+
+酌情添加标准库(kotlin-stdlib)、反射库(kotlin-reflect)，
+其中若使用数据类(data class)、通过构造函数传入参数则添加反射库。
 
 ```xml
 <dependency>
@@ -111,7 +114,7 @@ dependencies {
 
 ```kotlin
 dependencies {
-    implementation("com.alibaba.fastjson2:fastjson2-kotlin:2.0.34")
+    implementation("com.alibaba.fastjson2:fastjson2-kotlin:2.0.43")
 }
 ```
 
@@ -132,7 +135,7 @@ dependencies {
 <dependency>
     <groupId>com.alibaba.fastjson2</groupId>
     <artifactId>fastjson2-extension-spring5</artifactId>
-    <version>2.0.34</version>
+    <version>2.0.43</version>
 </dependency>
 ```
 
@@ -140,7 +143,7 @@ dependencies {
 <dependency>
     <groupId>com.alibaba.fastjson2</groupId>
     <artifactId>fastjson2-extension-spring6</artifactId>
-    <version>2.0.34</version>
+    <version>2.0.43</version>
 </dependency>
 ```
 
@@ -148,14 +151,14 @@ dependencies {
 
 ```groovy
 dependencies {
-    implementation 'com.alibaba.fastjson2:fastjson2-extension-spring5:2.0.34'
+    implementation 'com.alibaba.fastjson2:fastjson2-extension-spring5:2.0.43'
 }
 ```
 
 
 ```groovy
 dependencies {
-    implementation 'com.alibaba.fastjson2:fastjson2-extension-spring6:2.0.34'
+    implementation 'com.alibaba.fastjson2:fastjson2-extension-spring6:2.0.43'
 }
 ```
 
@@ -402,3 +405,9 @@ JSONPath path = JSONPath.of("$.id"); // 缓存起来重复使用能提升性能
 JSONReader parser = JSONReader.ofJSONB(bytes); // 注意这里使用ofJSONB方法
 Object result = path.extract(parser);
 ```
+
+## Star History
+
+
+[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/fastjson2&type=Date)](https://star-history.com/#alibaba/fastjson2)
+

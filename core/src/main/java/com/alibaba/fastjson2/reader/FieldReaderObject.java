@@ -16,6 +16,8 @@ import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
+import static com.alibaba.fastjson2.util.JDKUtils.UNSAFE;
+
 public class FieldReaderObject<T>
         extends FieldReader<T> {
     protected ObjectReader initReader;
@@ -121,8 +123,8 @@ public class FieldReaderObject<T>
             return;
         }
 
+        Object value;
         try {
-            Object value;
             if (jsonReader.nextIfNull()) {
                 if (fieldClass == OptionalInt.class) {
                     value = OptionalInt.empty();
@@ -135,7 +137,7 @@ public class FieldReaderObject<T>
                 } else {
                     value = null;
                 }
-            } else if (jsonReader.isJSONB()) {
+            } else if (jsonReader.jsonb) {
                 if (fieldClass == Object.class) {
                     ObjectReader autoTypeObjectReader = jsonReader.checkAutoType(Object.class, 0, features);
                     if (autoTypeObjectReader != null) {
@@ -149,22 +151,26 @@ public class FieldReaderObject<T>
             } else {
                 value = objectReader.readObject(jsonReader, fieldType, fieldName, features);
             }
-            accept(object, value);
-
-            if (noneStaticMemberClass) {
-                BeanUtils.setNoneStaticMemberClassParent(value, object);
-            }
         } catch (JSONSchemaValidException ex) {
             throw ex;
         } catch (Exception | IllegalAccessError ex) {
-            Member member = this.field != null ? this.field : this.method;
-            String message;
-            if (member != null) {
-                message = "read field '" + member.getDeclaringClass().getName() + "." + member.getName();
-            } else {
-                message = "read field " + fieldName + " error";
+            if ((features & JSONReader.Feature.NullOnError.mask) == 0) {
+                Member member = this.field != null ? this.field : this.method;
+                String message;
+                if (member != null) {
+                    message = "read field '" + member.getDeclaringClass().getName() + "." + member.getName();
+                } else {
+                    message = "read field " + fieldName + " error";
+                }
+                throw new JSONException(jsonReader.info(message), ex);
             }
-            throw new JSONException(jsonReader.info(message), ex);
+            value = null;
+        }
+
+        accept(object, value);
+
+        if (noneStaticMemberClass && value != null) {
+            BeanUtils.setNoneStaticMemberClassParent(value, object);
         }
     }
 
@@ -269,7 +275,7 @@ public class FieldReaderObject<T>
             } else if (method != null) {
                 method.invoke(object, value);
             } else {
-                field.set(object, value);
+                UNSAFE.putObject(object, fieldOffset, value);
             }
         } catch (Exception e) {
             throw new JSONException("set " + (function != null ? super.toString() : fieldName) + " error", e);
@@ -282,7 +288,7 @@ public class FieldReaderObject<T>
             initReader = getObjectReader(jsonReader);
         }
 
-        Object object = jsonReader.isJSONB()
+        Object object = jsonReader.jsonb
                 ? initReader.readJSONBObject(jsonReader, fieldType, fieldName, features)
                 : initReader.readObject(jsonReader, fieldType, fieldName, features);
 
@@ -318,5 +324,10 @@ public class FieldReaderObject<T>
         }
 
         jsonReader.skipValue();
+    }
+
+    @Override
+    public BiConsumer getFunction() {
+        return function;
     }
 }

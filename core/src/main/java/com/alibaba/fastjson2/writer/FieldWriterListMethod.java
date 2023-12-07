@@ -3,6 +3,7 @@ package com.alibaba.fastjson2.writer;
 import com.alibaba.fastjson2.JSONException;
 import com.alibaba.fastjson2.JSONWriter;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
@@ -19,11 +20,12 @@ final class FieldWriterListMethod<T>
             long features,
             String format,
             String label,
+            Field field,
             Method method,
             Type fieldType,
             Class fieldClass
     ) {
-        super(fieldName, itemType, ordinal, features, format, label, fieldType, fieldClass, null, method);
+        super(fieldName, itemType, ordinal, features, format, label, fieldType, fieldClass, field, method);
     }
 
     @Override
@@ -73,7 +75,7 @@ final class FieldWriterListMethod<T>
         if (itemType == String.class) {
             writeListStr(jsonWriter, true, value);
         } else {
-            writeList(jsonWriter, true, value);
+            writeList(jsonWriter, value);
         }
         jsonWriter.popPath(value);
         return true;
@@ -88,6 +90,6 @@ final class FieldWriterListMethod<T>
             return;
         }
 
-        writeList(jsonWriter, false, value);
+        writeListValue(jsonWriter, value);
     }
 }

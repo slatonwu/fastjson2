@@ -13,9 +13,22 @@ public class UsersWriteUTF8BytesTest {
             }
             long millis = System.currentTimeMillis() - start;
             System.out.println("fastjson2 millis : " + millis);
-            // zulu17.40.19 : 1664 1657 1650 1591 1564
+            // zulu17.40.19 : 1664 1657 1650 1591 1564 1445
             // oracle-jdk-17.0.6 :
             // oracle-jdk-17.0.6_vec : 1230
+        }
+    }
+
+    public static void jsonb_beanToArray() {
+        for (int j = 0; j < 5; j++) {
+            long start = System.currentTimeMillis();
+            for (int i = 0; i < 1000 * 1000; ++i) {
+                benchmark.jsonb_beanToArray(BH);
+            }
+            long millis = System.currentTimeMillis() - start;
+            System.out.println("ClientsWriteUTF8Bytes-jsonb_beanToArray millis : " + millis);
+            // zulu17.40.19 : 371
+            // zulu17.40.19_vec :
         }
     }
 
@@ -44,6 +57,7 @@ public class UsersWriteUTF8BytesTest {
 
     public static void main(String[] args) throws Exception {
         fastjson2();
+//        jsonb_beanToArray();
 //        dsljson();
 //        jackson();
     }

@@ -63,7 +63,7 @@ public class FieldReaderList<T, V>
 
     @Override
     public void readFieldValue(JSONReader jsonReader, T object) {
-        if (jsonReader.isJSONB()) {
+        if (jsonReader.jsonb) {
             readFieldValueJSONB(jsonReader, object);
             return;
         }
@@ -97,20 +97,13 @@ public class FieldReaderList<T, V>
                     break;
                 }
 
-                Object item;
-                if (jsonReader.isReference()) {
-                    String path = jsonReader.readReference();
-                    if ("..".equals(path)) {
-                        item = list;
-                    } else {
-                        addResolveTask(jsonReader, (List) list, i, path);
-                        continue;
-                    }
-                } else {
-                    item = itemObjectReader.readObject(jsonReader, null, null, 0);
+                if (jsonReader.readReference((List) list, i)) {
+                    continue;
                 }
 
-                list.add(item);
+                list.add(
+                        itemObjectReader.readObject(jsonReader, null, null, 0)
+                );
 
                 jsonReader.nextIfComma();
             }
@@ -122,7 +115,7 @@ public class FieldReaderList<T, V>
             jsonReader.nextIfComma();
             return;
         } else if (current == '{' && getItemObjectReader(context) instanceof ObjectReaderBean) {
-            Object itemValue = jsonReader.isJSONB()
+            Object itemValue = jsonReader.jsonb
                     ? itemReader.readJSONBObject(jsonReader, null, null, features)
                     : itemReader.readObject(jsonReader, null, null, features);
             Collection list = (Collection) objectReader.createInstance(features);
@@ -136,7 +129,7 @@ public class FieldReaderList<T, V>
             return;
         }
 
-        Object value = jsonReader.isJSONB()
+        Object value = jsonReader.jsonb
                 ? objectReader.readJSONBObject(jsonReader, null, null, features)
                 : objectReader.readObject(jsonReader, null, null, features);
         accept(object, value);
@@ -144,7 +137,7 @@ public class FieldReaderList<T, V>
 
     @Override
     public Object readFieldValue(JSONReader jsonReader) {
-        if (jsonReader.isJSONB()) {
+        if (jsonReader.jsonb) {
             int entryCnt = jsonReader.startArray();
 
             Object[] array = new Object[entryCnt];
@@ -222,6 +215,10 @@ public class FieldReaderList<T, V>
 
             boolean isSupportAutoType = jsonReader.isSupportAutoType(features);
             if (!isSupportAutoType) {
+                if (jsonReader.isArray() && !jsonReader.isEnabled(JSONReader.Feature.ErrorOnNotSupportAutoType)) {
+                    return getObjectReader(jsonReader);
+                }
+
                 throw new JSONException(jsonReader.info("autoType not support input " + jsonReader.getString()));
             }
 

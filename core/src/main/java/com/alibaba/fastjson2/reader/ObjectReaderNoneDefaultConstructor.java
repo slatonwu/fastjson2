@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONException;
 import com.alibaba.fastjson2.JSONFactory;
 import com.alibaba.fastjson2.JSONReader;
 import com.alibaba.fastjson2.util.Fnv;
+import com.alibaba.fastjson2.util.TypeUtils;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Type;
@@ -19,6 +20,7 @@ public class ObjectReaderNoneDefaultConstructor<T>
     final String[] paramNames;
     final FieldReader[] setterFieldReaders;
     private final Function<Map<Long, Object>, T> creator;
+    final Map<Long, FieldReader> paramFieldReaderMap;
 
     public ObjectReaderNoneDefaultConstructor(
             Class objectClass,
@@ -49,6 +51,10 @@ public class ObjectReaderNoneDefaultConstructor<T>
         this.paramNames = paramNames;
         this.creator = creator;
         this.setterFieldReaders = setterFieldReaders;
+        this.paramFieldReaderMap = new HashMap<>();
+        for (FieldReader paramFieldReader : paramFieldReaders) {
+            paramFieldReaderMap.put(paramFieldReader.fieldNameHash, paramFieldReader);
+        }
     }
 
     static FieldReader[] concat(FieldReader[] a, FieldReader[] b) {
@@ -80,7 +86,7 @@ public class ObjectReaderNoneDefaultConstructor<T>
 
         if (type == BC_TYPED_ANY) {
             ObjectReader objectReader = jsonReader.checkAutoType(this.objectClass, typeNameHash, this.features | features);
-            if (objectReader != this) {
+            if (objectReader != null && objectReader != this) {
                 return (T) objectReader.readJSONBObject(jsonReader, fieldType, fieldName, features);
             }
         }
@@ -192,7 +198,7 @@ public class ObjectReaderNoneDefaultConstructor<T>
             jsonReader.errorOnNoneSerializable(objectClass);
         }
 
-        if (jsonReader.isJSONB()) {
+        if (jsonReader.jsonb) {
             return readJSONBObject(jsonReader, fieldType, fieldName, 0);
         }
 
@@ -275,6 +281,14 @@ public class ObjectReaderNoneDefaultConstructor<T>
             }
 
             FieldReader fieldReader = getFieldReader(hashCode);
+            FieldReader paramReader = paramFieldReaderMap.get(hashCode);
+            if (paramReader != null
+                    && fieldReader != null
+                    && paramReader.fieldClass != null
+                    && !paramReader.fieldClass.equals(fieldReader.fieldClass)
+            ) {
+                fieldReader = paramReader;
+            }
 
             if (fieldReader == null && (featuresAll & JSONReader.Feature.SupportSmartMatch.mask) != 0) {
                 long hashCodeLCase = jsonReader.getNameHashCodeLCase();
@@ -315,6 +329,11 @@ public class ObjectReaderNoneDefaultConstructor<T>
         if (setterFieldReaders != null && valueMap != null) {
             for (int i = 0; i < setterFieldReaders.length; i++) {
                 FieldReader fieldReader = setterFieldReaders[i];
+                FieldReader paramReader = paramFieldReaderMap.get(fieldReader.fieldNameHash);
+                if (paramReader != null && !paramReader.fieldClass.equals(fieldReader.fieldClass)) {
+                    continue;
+                }
+
                 Object fieldValue = valueMap.get(fieldReader.fieldNameHash);
                 if (fieldValue != null) {
                     fieldReader.accept(object, fieldValue);
@@ -452,25 +471,31 @@ public class ObjectReaderNoneDefaultConstructor<T>
                         : valueMap
         );
 
-        for (int i = 0; i < setterFieldReaders.length; i++) {
-            FieldReader fieldReader = setterFieldReaders[i];
-            Object fieldValue = map.get(fieldReader.fieldName);
-            if (fieldValue == null) {
-                continue;
-            }
-
-            Class<?> valueClass = fieldValue.getClass();
-            Class fieldClass = fieldReader.fieldClass;
-            if (valueClass != fieldClass) {
-                Function typeConvert = provider.getTypeConvert(valueClass, fieldClass);
-                if (typeConvert != null) {
-                    fieldValue = typeConvert.apply(fieldValue);
-                } else if (fieldValue instanceof Map) {
-                    ObjectReader objectReader = fieldReader.getObjectReader(JSONFactory.createReadContext(provider));
-                    fieldValue = objectReader.createInstance((Map) fieldValue, features | fieldReader.features);
+        if (setterFieldReaders != null) {
+            for (int i = 0; i < setterFieldReaders.length; i++) {
+                FieldReader fieldReader = setterFieldReaders[i];
+                Object fieldValue = map.get(fieldReader.fieldName);
+                if (fieldValue == null) {
+                    continue;
                 }
+
+                Class<?> valueClass = fieldValue.getClass();
+                Class fieldClass = fieldReader.fieldClass;
+                Type fieldType = fieldReader.fieldType;
+                if (!(fieldType instanceof Class)) {
+                    fieldValue = TypeUtils.cast(fieldValue, fieldType, provider);
+                } else if (valueClass != fieldClass) {
+                    Function typeConvert = provider.getTypeConvert(valueClass, fieldClass);
+                    if (typeConvert != null) {
+                        fieldValue = typeConvert.apply(fieldValue);
+                    } else if (fieldValue instanceof Map) {
+                        ObjectReader objectReader = fieldReader.getObjectReader(JSONFactory.createReadContext(provider));
+                        fieldValue = objectReader.createInstance((Map) fieldValue, features | fieldReader.features);
+                    }
+                }
+
+                fieldReader.accept(object, fieldValue);
             }
-            fieldReader.accept(object, fieldValue);
         }
 
         return object;

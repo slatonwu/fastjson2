@@ -12,12 +12,14 @@ import java.lang.reflect.*;
 import java.lang.reflect.Type;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicIntegerArray;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
+import java.util.function.Function;
 
 import static com.alibaba.fastjson2.JSONWriter.Feature.*;
 import static com.alibaba.fastjson2.internal.asm.ASMUtils.*;
@@ -27,33 +29,11 @@ import static com.alibaba.fastjson2.writer.ObjectWriterProvider.TYPE_INT64_MASK;
 
 public class ObjectWriterCreatorASM
         extends ObjectWriterCreator {
-    static final boolean DISABLE_STRING_UNSAFE_GET;
-
     // GraalVM not support
     // Android not support
     public static final ObjectWriterCreatorASM INSTANCE = new ObjectWriterCreatorASM(
             DynamicClassLoader.getInstance()
     );
-
-    static {
-        {
-            String key = "fastjson2.disableStringUnsafeGet";
-            String property = System.getProperty(key);
-            if (property == null || property.isEmpty()) {
-                String str = JSONFactory.getProperty(key);
-                if (str != null && !property.isEmpty()) {
-                    property = str;
-                }
-            }
-            boolean value = !(UNSAFE_SUPPORT && !ANDROID && !GRAAL);
-            if ("".equals(property) || "true".equals(property)) {
-                value = true;
-            } else if ("false".equals(property)) {
-                value = false;
-            }
-            DISABLE_STRING_UNSAFE_GET = false;
-        }
-    }
 
     protected static final AtomicLong seed = new AtomicLong();
     protected final DynamicClassLoader classLoader;
@@ -77,7 +57,7 @@ public class ObjectWriterCreatorASM
     static final String METHOD_DESC_WRITE_BArray = "(" + DESC_JSON_WRITER + "[B)V";
     static final String METHOD_DESC_WRITE_CArray = "(" + DESC_JSON_WRITER + "[C)V";
     static final String METHOD_DESC_WRITE_ENUM = "(" + DESC_JSON_WRITER + "Ljava/lang/Enum;)V";
-    static final String METHOD_DESC_WRITE_LIST = "(" + DESC_JSON_WRITER + "ZLjava/util/List;)V";
+    static final String METHOD_DESC_WRITE_LIST = "(" + DESC_JSON_WRITER + "Ljava/util/List;)V";
     static final String METHOD_DESC_FIELD_WRITE_OBJECT = "(" + DESC_JSON_WRITER + "Ljava/lang/Object;)Z";
     static final String METHOD_DESC_GET_OBJECT_WRITER = "(" + DESC_JSON_WRITER + "Ljava/lang/Class;)" + DESC_OBJECT_WRITER;
     static final String METHOD_DESC_GET_ITEM_WRITER = "(" + DESC_JSON_WRITER + "Ljava/lang/reflect/Type;)" + DESC_OBJECT_WRITER;
@@ -92,6 +72,7 @@ public class ObjectWriterCreatorASM
     static final String NOT_WRITE_DEFAULT_VALUE = "WRITE_DEFAULT_VALUE";
     static final String WRITE_NULLS = "WRITE_NULLS";
     static final String CONTEXT_FEATURES = "CONTEXT_FEATURES";
+    static final String UTF8_DIRECT = "UTF8_DIRECT";
 
     static String fieldWriter(int i) {
         switch (i) {
@@ -149,6 +130,26 @@ public class ObjectWriterCreatorASM
 
     @Override
     public ObjectWriter createObjectWriter(
+            List<FieldWriter> fieldWriters
+    ) {
+        boolean allFunction = true;
+        for (int i = 0; i < fieldWriters.size(); i++) {
+            if (fieldWriters.get(i).getFunction() == null) {
+                allFunction = false;
+                break;
+            }
+        }
+
+        if (!allFunction) {
+            return super.createObjectWriter(fieldWriters);
+        }
+
+        BeanInfo beanInfo = new BeanInfo();
+        return jitWriter(null, JSONFactory.getDefaultObjectWriterProvider(), beanInfo, fieldWriters, 0);
+    }
+
+    @Override
+    public ObjectWriter createObjectWriter(
             Class objectClass,
             long features,
             ObjectWriterProvider provider
@@ -156,12 +157,6 @@ public class ObjectWriterCreatorASM
         int modifiers = objectClass.getModifiers();
         boolean externalClass = classLoader.isExternalClass(objectClass);
         boolean publicClass = Modifier.isPublic(modifiers);
-
-        if (!publicClass || externalClass) {
-            if (!UNSAFE_SUPPORT) {
-                return super.createObjectWriter(objectClass, features, provider);
-            }
-        }
 
         BeanInfo beanInfo = new BeanInfo();
         provider.getBeanInfo(beanInfo, objectClass);
@@ -419,9 +414,21 @@ public class ObjectWriterCreatorASM
             return super.createObjectWriter(objectClass, features, provider);
         }
 
+        setDefaultValue(fieldWriters, objectClass);
+
+        return jitWriter(objectClass, provider, beanInfo, fieldWriters, writerFeatures);
+    }
+
+    private ObjectWriterAdapter jitWriter(
+            Class objectClass,
+            ObjectWriterProvider provider,
+            BeanInfo beanInfo,
+            List<FieldWriter> fieldWriters,
+            long writerFeatures
+    ) {
         ClassWriter cw = new ClassWriter(null);
 
-        String className = "OWG_" + seed.incrementAndGet() + "_" + fieldWriters.size() + "_" + objectClass.getSimpleName();
+        String className = "OWG_" + seed.incrementAndGet() + "_" + fieldWriters.size() + (objectClass == null ? "" : ("_" + objectClass.getSimpleName()));
         String classNameType;
         String classNameFull;
 
@@ -571,7 +578,7 @@ public class ObjectWriterCreatorASM
         Label json_ = new Label(), jsonb_ = new Label(), notSuper_ = new Label();
 
         MethodWriterContext mwc = new MethodWriterContext(provider, objectType, objectFeatures, classNameType, mw, 8, false);
-        mwc.genVariantsMethodBefore();
+        mwc.genVariantsMethodBefore(false);
 
         mwc.genIsEnabled(JSONWriter.Feature.IgnoreErrorGetter.mask, notSuper_);
 
@@ -646,7 +653,7 @@ public class ObjectWriterCreatorASM
         mw.visitLabel(object_);
 
         Label return_ = new Label();
-        if (!java.io.Serializable.class.isAssignableFrom(objectType)) {
+        if (objectType == null || !java.io.Serializable.class.isAssignableFrom(objectType)) {
             Label endIgnoreNoneSerializable_ = new Label();
             mwc.genIsEnabled(JSONWriter.Feature.IgnoreNoneSerializable.mask, endIgnoreNoneSerializable_);
 
@@ -673,7 +680,7 @@ public class ObjectWriterCreatorASM
         mw.visitVarInsn(Opcodes.ISTORE, COMMA); // comma = false
 
         Label writeFields_ = new Label();
-        isWriteTypeInfo(objectFeatures, mw, OBJECT, FIELD_TYPE, writeFields_);
+        isWriteTypeInfo(objectFeatures, mw, OBJECT, FIELD_TYPE, FIELD_FEATURES, writeFields_);
 
         mw.visitVarInsn(Opcodes.ALOAD, THIS);
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
@@ -702,6 +709,7 @@ public class ObjectWriterCreatorASM
             MethodWriter mw,
             int OBJECT,
             int FIELD_TYPE,
+            int FEILD_FEATURE,
             Label notWriteType
     ) {
         if ((objectFeatures & JSONWriter.Feature.WriteClassName.mask) == 0) {
@@ -716,7 +724,8 @@ public class ObjectWriterCreatorASM
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
             mw.visitVarInsn(Opcodes.ALOAD, OBJECT);
             mw.visitVarInsn(Opcodes.ALOAD, FIELD_TYPE);
-            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "isWriteTypeInfo", "(Ljava/lang/Object;Ljava/lang/reflect/Type;)Z", false);
+            mw.visitVarInsn(Opcodes.LLOAD, FEILD_FEATURE);
+            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "isWriteTypeInfo", "(Ljava/lang/Object;Ljava/lang/reflect/Type;J)Z", false);
             mw.visitJumpInsn(Opcodes.IFEQ, notWriteType);
         }
     }
@@ -742,10 +751,10 @@ public class ObjectWriterCreatorASM
         final int FIELD_FEATURES = 5;
 
         MethodWriterContext mwc = new MethodWriterContext(provider, objectType, objectFeatures, classNameType, mw, 7, true);
-        mwc.genVariantsMethodBefore();
+        mwc.genVariantsMethodBefore(true);
 
         Label return_ = new Label();
-        if (!java.io.Serializable.class.isAssignableFrom(objectType)) {
+        if (objectType == null || !java.io.Serializable.class.isAssignableFrom(objectType)) {
             Label endIgnoreNoneSerializable_ = new Label();
             mwc.genIsEnabled(JSONWriter.Feature.IgnoreNoneSerializable.mask, endIgnoreNoneSerializable_);
 
@@ -766,7 +775,7 @@ public class ObjectWriterCreatorASM
         }
 
         Label notWriteType = new Label();
-        isWriteTypeInfo(objectFeatures, mw, OBJECT, FIELD_TYPE, notWriteType);
+        isWriteTypeInfo(objectFeatures, mw, OBJECT, FIELD_TYPE, FIELD_FEATURES, notWriteType);
 
         mw.visitVarInsn(Opcodes.ALOAD, THIS);
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
@@ -813,7 +822,7 @@ public class ObjectWriterCreatorASM
 
         {
             Label notWriteType = new Label();
-            isWriteTypeInfo(objectFeatures, mw, OBJECT, FIELD_TYPE, notWriteType);
+            isWriteTypeInfo(objectFeatures, mw, OBJECT, FIELD_TYPE, FIELD_FEATURES, notWriteType);
 
             mw.visitVarInsn(Opcodes.ALOAD, THIS);
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
@@ -834,7 +843,7 @@ public class ObjectWriterCreatorASM
 
         MethodWriterContext mwc = new MethodWriterContext(provider, objectType, objectFeatures, classNameType, mw, 7, true);
 
-        mwc.genVariantsMethodBefore();
+        mwc.genVariantsMethodBefore(true);
 
         for (int i = 0; i < size; i++) {
             gwValueJSONB(
@@ -884,6 +893,9 @@ public class ObjectWriterCreatorASM
                 || fieldClass == double.class
                 || fieldClass == double[].class
                 || fieldClass == String.class
+                || fieldClass == Integer.class
+                || fieldClass == Long.class
+                || fieldClass == BigDecimal.class
                 || fieldClass.isEnum()
         ) {
             gwValue(mwc, fieldWriter, OBJECT, i);
@@ -915,7 +927,7 @@ public class ObjectWriterCreatorASM
 
         Label endIfNull_ = new Label(), notNull_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
 
@@ -1014,21 +1026,23 @@ public class ObjectWriterCreatorASM
         int LIST = mwc.var(fieldClass);
         int REF_PATH = mwc.var("REF_PATH");
 
-        boolean listStr = false;
-        Type itemType;
+        boolean listSimple = false;
+        Type itemType = null;
+        Class itemClass = null;
         if (fieldType instanceof ParameterizedType) {
             ParameterizedType parameterizedType = (ParameterizedType) fieldType;
             Type[] actualTypeArguments = parameterizedType.getActualTypeArguments();
 
             if (actualTypeArguments.length == 1) {
                 itemType = actualTypeArguments[0];
-                listStr = itemType == String.class;
+                itemClass = TypeUtils.getClass(itemType);
+                listSimple = (itemType == String.class || itemType == Integer.class || itemType == Long.class);
             }
         }
 
         Label endIfListNull_ = new Label(), listNotNull_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, LIST);
         mw.visitJumpInsn(Opcodes.IFNONNULL, listNotNull_);
@@ -1077,8 +1091,8 @@ public class ObjectWriterCreatorASM
             mw.visitLabel(endDetect_);
         }
 
-        if (listStr) {
-            gwListStr(mwc, i, mw, fieldClass, LIST);
+        if (listSimple) {
+            gwListSimpleType(mwc, i, mw, fieldClass, itemClass, LIST);
         } else {
             int PREVIOUS_CLASS = mwc.var("ITEM_CLASS");
             int ITEM_OBJECT_WRITER = mwc.var("ITEM_OBJECT_WRITER");
@@ -1091,9 +1105,14 @@ public class ObjectWriterCreatorASM
             mw.visitVarInsn(Opcodes.ALOAD, THIS);
             mw.visitFieldInsn(Opcodes.GETFIELD, classNameType, fieldWriter(i), DESC_FIELD_WRITER);
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
-            mw.visitInsn(Opcodes.ICONST_0);
             mw.visitVarInsn(Opcodes.ALOAD, LIST);
-            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_FIELD_WRITER, "writeList", METHOD_DESC_WRITE_LIST, false);
+            mw.visitMethodInsn(
+                    Opcodes.INVOKEVIRTUAL,
+                    TYPE_FIELD_WRITER,
+                    "writeListValueJSONB",
+                    METHOD_DESC_WRITE_LIST,
+                    false
+            );
 
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
             mw.visitVarInsn(Opcodes.ALOAD, LIST);
@@ -1110,7 +1129,7 @@ public class ObjectWriterCreatorASM
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
         mw.visitInsn(Opcodes.ICONST_0);
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_FIELD_WRITER, "writeDate", METHOD_DESC_WRITE_DATE_WITH_FIELD_NAME, false);
     }
 
@@ -1119,7 +1138,7 @@ public class ObjectWriterCreatorASM
         Class fieldClass = fieldWriter.fieldClass;
 
         if (fieldClass == String.class) {
-            genGetObject(mwc, fieldWriter, OBJECT);
+            genGetObject(mwc, fieldWriter, i, OBJECT);
             mw.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/String");
             int FIELD_VALUE = mwc.var("FIELD_VALUE_" + fieldWriter.fieldClass.getName());
             mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
@@ -1129,7 +1148,7 @@ public class ObjectWriterCreatorASM
         }
 
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
 
         if (fieldWriter.decimalFormat != null) {
             if (fieldClass == double.class) {
@@ -1142,6 +1161,12 @@ public class ObjectWriterCreatorASM
                 mw.visitFieldInsn(Opcodes.GETFIELD, mwc.classNameType, fieldWriter(i), DESC_FIELD_WRITER);
                 mw.visitFieldInsn(Opcodes.GETFIELD, TYPE_FIELD_WRITER, "decimalFormat", "Ljava/text/DecimalFormat;");
                 mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "writeFloat", "(FLjava/text/DecimalFormat;)V", false);
+            } else if (fieldClass == BigDecimal.class) {
+                mw.visitLdcInsn(fieldWriter.features);
+                mw.visitVarInsn(Opcodes.ALOAD, THIS);
+                mw.visitFieldInsn(Opcodes.GETFIELD, mwc.classNameType, fieldWriter(i), DESC_FIELD_WRITER);
+                mw.visitFieldInsn(Opcodes.GETFIELD, TYPE_FIELD_WRITER, "decimalFormat", "Ljava/text/DecimalFormat;");
+                mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "writeDecimal", "(Ljava/math/BigDecimal;JLjava/text/DecimalFormat;)V", false);
             } else {
                 throw new UnsupportedOperationException();
             }
@@ -1164,9 +1189,15 @@ public class ObjectWriterCreatorASM
         } else if (fieldClass == int.class) {
             methodName = "writeInt32";
             methodDesc = "(I)V";
+        } else if (fieldClass == Integer.class) {
+            methodName = "writeInt32";
+            methodDesc = "(Ljava/lang/Integer;)V";
         } else if (fieldClass == long.class) {
             methodName = "writeInt64";
             methodDesc = "(J)V";
+        } else if (fieldClass == Long.class) {
+            methodName = "writeInt64";
+            methodDesc = "(Ljava/lang/Long;)V";
         } else if (fieldClass == float.class) {
             methodName = "writeFloat";
             methodDesc = "(F)V";
@@ -1197,6 +1228,11 @@ public class ObjectWriterCreatorASM
         } else if (fieldClass == double[].class) {
             methodName = "writeDouble";
             methodDesc = "([D)V";
+        } else if (fieldClass == BigDecimal.class) {
+            methodName = "writeDecimal";
+            methodDesc = "(Ljava/math/BigDecimal;JLjava/text/DecimalFormat;)V";
+            mw.visitLdcInsn(fieldWriter.features);
+            mw.visitInsn(Opcodes.ACONST_NULL);
         } else if (Enum.class.isAssignableFrom(fieldClass)) {
             methodName = "writeEnum";
             methodDesc = "(Ljava/lang/Enum;)V";
@@ -1217,11 +1253,17 @@ public class ObjectWriterCreatorASM
             int i
     ) {
         MethodWriter mw = mwc.mw;
-        mw.visitVarInsn(Opcodes.ALOAD, THIS);
-        mw.visitFieldInsn(Opcodes.GETFIELD, mwc.classNameType, fieldWriter(i), DESC_FIELD_WRITER);
-        mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
-        mw.visitVarInsn(Opcodes.ALOAD, OBJECT);
-        mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_FIELD_WRITER, "writeValue", METHOD_DESC_WRITE_VALUE, false);
+        if (fieldWriter.fieldClass == String[].class) {
+            mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
+            genGetObject(mwc, fieldWriter, i, OBJECT);
+            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "writeString", "([Ljava/lang/String;)V", false);
+        } else {
+            mw.visitVarInsn(Opcodes.ALOAD, THIS);
+            mw.visitFieldInsn(Opcodes.GETFIELD, mwc.classNameType, fieldWriter(i), DESC_FIELD_WRITER);
+            mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
+            mw.visitVarInsn(Opcodes.ALOAD, OBJECT);
+            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_FIELD_WRITER, "writeValue", METHOD_DESC_WRITE_VALUE, false);
+        }
     }
 
     private void genMethodWriteArrayMapping(
@@ -1313,7 +1355,7 @@ public class ObjectWriterCreatorASM
         Class objectType = mwc.objectClass;
         Class<?> fieldClass = fieldWriter.fieldClass;
 
-        final String TYPE_OBJECT = ASMUtils.type(objectType);
+        final String TYPE_OBJECT = objectType == null ? "java/lang/Object" : ASMUtils.type(objectType);
 
         boolean userDefineWriter = false;
         if ((fieldClass == long.class || fieldClass == Long.class || fieldClass == long[].class)
@@ -1338,6 +1380,9 @@ public class ObjectWriterCreatorASM
                 || fieldClass == double.class
                 || fieldClass == double[].class
                 || fieldClass == String.class
+                || fieldClass == Integer.class
+                || fieldClass == Long.class
+                || fieldClass == BigDecimal.class
                 || fieldClass.isEnum()
         ) {
             gwValue(mwc, fieldWriter, OBJECT, i);
@@ -1366,7 +1411,7 @@ public class ObjectWriterCreatorASM
 
         Label endIfNull_ = new Label(), notNull_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
 
@@ -1500,7 +1545,7 @@ public class ObjectWriterCreatorASM
         int LIST = mwc.var(fieldClass);
         MethodWriter mw = mwc.mw;
 
-        boolean listStr = false;
+        boolean listSimple = false;
         Type itemType;
         Class itemClass = null;
         if (fieldType instanceof ParameterizedType) {
@@ -1510,13 +1555,13 @@ public class ObjectWriterCreatorASM
             if (actualTypeArguments.length == 1) {
                 itemType = actualTypeArguments[0];
                 itemClass = TypeUtils.getMapping(itemType);
-                listStr = itemType == String.class;
+                listSimple = (itemType == String.class || itemType == Integer.class || itemType == Long.class);
             }
         }
 
         Label endIfListNull_ = new Label(), listNotNull_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, LIST);
         mw.visitJumpInsn(Opcodes.IFNONNULL, listNotNull_);
@@ -1527,10 +1572,10 @@ public class ObjectWriterCreatorASM
 
         mw.visitLabel(listNotNull_);
 
-        if (listStr) {
-            genGetObject(mwc, fieldWriter, OBJECT);
+        if (listSimple) {
+            genGetObject(mwc, fieldWriter, i, OBJECT);
             mw.visitVarInsn(Opcodes.ASTORE, LIST);
-            gwListStr(mwc, i, mw, fieldClass, LIST);
+            gwListSimpleType(mwc, i, mw, fieldClass, itemClass, LIST);
         } else {
             int LIST_SIZE = mwc.var("LIST_SIZE");
             int J = mwc.var("J");
@@ -1646,23 +1691,22 @@ public class ObjectWriterCreatorASM
 
         if (fieldClass == boolean.class) {
             gwFieldValueBooleanV(mwc, fieldWriter, OBJECT, i, false);
-        } else if (fieldClass == boolean[].class) {
+        } else if (fieldClass == boolean[].class
+                || fieldClass == byte[].class
+                || fieldClass == char[].class
+                || fieldClass == short[].class
+                || fieldClass == float[].class
+                || fieldClass == double[].class
+        ) {
             gwFieldValueArray(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == char.class) {
-            gwFieldName(mwc, i);
+        } else if (fieldClass == char.class
+                || fieldClass == byte.class
+                || fieldClass == short.class
+                || fieldClass == float.class
+                || fieldClass == double.class
+        ) {
+            gwFieldName(mwc, fieldWriter, i);
             gwValue(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == char[].class) {
-            gwFieldValueArray(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == byte.class) {
-            gwFieldName(mwc, i);
-            gwValue(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == byte[].class) {
-            gwFieldValueArray(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == short.class) {
-            gwFieldName(mwc, i);
-            gwValue(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == short[].class) {
-            gwFieldValueArray(mwc, fieldWriter, OBJECT, i);
         } else if (fieldClass == int.class) {
             gwFieldValueInt32V(mwc, fieldWriter, OBJECT, i, false);
         } else if (fieldClass == int[].class) {
@@ -1673,16 +1717,6 @@ public class ObjectWriterCreatorASM
                 && mwc.provider.getObjectWriter(Long.class) == ObjectWriterImplInt64.INSTANCE
         ) {
             gwFieldValueInt64VA(mwc, fieldWriter, OBJECT, i, false);
-        } else if (fieldClass == float.class) {
-            gwFieldName(mwc, i);
-            gwValue(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == float[].class) {
-            gwFieldValueArray(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == double.class) {
-            gwFieldName(mwc, i);
-            gwValue(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == double[].class) {
-            gwFieldValueArray(mwc, fieldWriter, OBJECT, i);
         } else if (fieldClass == Integer.class) {
             gwInt32(mwc, fieldWriter, OBJECT, i);
         } else if (fieldClass == Long.class) {
@@ -1719,7 +1753,7 @@ public class ObjectWriterCreatorASM
 
         int FIELD_VALUE = mwc.var(fieldClass);
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
 
@@ -1742,7 +1776,7 @@ public class ObjectWriterCreatorASM
         mw.visitJumpInsn(Opcodes.IFEQ, notNull_);
 
         // writeFieldName(w);
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         // jw.writeNulll
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
@@ -1785,7 +1819,7 @@ public class ObjectWriterCreatorASM
             mw.visitJumpInsn(Opcodes.GOTO, notNull_);
         }
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
 
@@ -1807,12 +1841,12 @@ public class ObjectWriterCreatorASM
 
             int REF_DETECT = mwc.var("REF_DETECT");
 
-            mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
             if (fieldClass == Object.class) {
+                mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
                 mw.visitVarInsn(Opcodes.ALOAD, FIELD_VALUE);
                 mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "isRefDetect", "(Ljava/lang/Object;)Z", false);
             } else {
-                mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "isRefDetect", "()Z", false);
+                mwc.genIsEnabled(JSONWriter.Feature.ReferenceDetection.mask, null);
             }
             mw.visitInsn(Opcodes.DUP);
             mw.visitVarInsn(Opcodes.ISTORE, REF_DETECT);
@@ -1822,7 +1856,7 @@ public class ObjectWriterCreatorASM
             mw.visitVarInsn(Opcodes.ALOAD, FIELD_VALUE);
             mw.visitJumpInsn(Opcodes.IF_ACMPNE, refSetPath_);
 
-            gwFieldName(mwc, i);
+            gwFieldName(mwc, fieldWriter, i);
 
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
             mw.visitLdcInsn("..");
@@ -1841,7 +1875,7 @@ public class ObjectWriterCreatorASM
             mw.visitVarInsn(Opcodes.ASTORE, REF_PATH);
             mw.visitJumpInsn(Opcodes.IFNULL, endDetect_);
 
-            gwFieldName(mwc, i);
+            gwFieldName(mwc, fieldWriter, i);
 
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
             mw.visitVarInsn(Opcodes.ALOAD, REF_PATH);
@@ -1853,6 +1887,11 @@ public class ObjectWriterCreatorASM
             mw.visitJumpInsn(Opcodes.GOTO, notNull_);
 
             mw.visitLabel(endDetect_);
+
+            if ("this$0".equals(fieldName) || "this$1".equals(fieldName) || "this$2".equals(fieldName)) {
+                mw.visitVarInsn(Opcodes.ILOAD, REF_DETECT);
+                mw.visitJumpInsn(Opcodes.IFEQ, notNull_);
+            }
         }
 
         if (Object[].class.isAssignableFrom(fieldClass)) {
@@ -1870,7 +1909,7 @@ public class ObjectWriterCreatorASM
         }
 
         // writeFieldName(w);
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         if (fieldClass == BigDecimal.class) {
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
@@ -1985,7 +2024,7 @@ public class ObjectWriterCreatorASM
         }
 
         // writeFieldName(w);
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         // jw.writeNulll
         String WRITE_NULL_METHOD;
@@ -2025,17 +2064,22 @@ public class ObjectWriterCreatorASM
         int LIST = mwc.var(fieldClass);
         int REF_PATH = mwc.var("REF_PATH");
 
-        boolean listStr = false;
+        Class itemClass = null;
+        boolean listSimple = false;
         if (fieldType instanceof ParameterizedType) {
             ParameterizedType parameterizedType = (ParameterizedType) fieldType;
             Type[] actualTypeArguments = parameterizedType.getActualTypeArguments();
 
-            listStr = actualTypeArguments.length == 1 && actualTypeArguments[0] == String.class;
+            if (actualTypeArguments.length == 1) {
+                Type arg0 = actualTypeArguments[0];
+                itemClass = TypeUtils.getClass(arg0);
+                listSimple = (arg0 == String.class || arg0 == Integer.class || arg0 == Long.class);
+            }
         }
 
         int FIELD_VALUE = mwc.var(fieldClass);
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
 
@@ -2094,7 +2138,7 @@ public class ObjectWriterCreatorASM
         }
 
         // listStr
-        if (listStr) {
+        if (listSimple) {
             // void writeListStr(JSONWriter jw, List<String> list)
 //            mw.visitVarInsn(Opcodes.ALOAD, THIS);
 //            mw.visitFieldInsn(Opcodes.GETFIELD, mwc.classNameType, fieldWriter(i), DESC_FIELD_WRITER);
@@ -2103,16 +2147,22 @@ public class ObjectWriterCreatorASM
 //            mw.visitVarInsn(Opcodes.ALOAD, FIELD_VALUE);
 //            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_FIELD_WRITER, "writeListStr", METHOD_DESC_WRITE_LIST, false);
 //
-            gwFieldName(mwc, i);
-            gwListStr(mwc, i, mw, fieldClass, FIELD_VALUE);
+            gwFieldName(mwc, fieldWriter, i);
+            gwListSimpleType(mwc, i, mw, fieldClass, itemClass, FIELD_VALUE);
         } else {
+            gwFieldName(mwc, fieldWriter, i);
+
             // void writeList(JSONWriter jw, ObjectWriterContext ctx, List list) {
             mw.visitVarInsn(Opcodes.ALOAD, THIS);
             mw.visitFieldInsn(Opcodes.GETFIELD, mwc.classNameType, fieldWriter(i), DESC_FIELD_WRITER);
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
-            mw.visitInsn(Opcodes.ICONST_1);
             mw.visitVarInsn(Opcodes.ALOAD, FIELD_VALUE);
-            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_FIELD_WRITER, "writeList", METHOD_DESC_WRITE_LIST, false);
+            mw.visitMethodInsn(
+                    Opcodes.INVOKEVIRTUAL,
+                    TYPE_FIELD_WRITER,
+                    mwc.jsonb ? "writeListValueJSONB" : "writeListValue",
+                    METHOD_DESC_WRITE_LIST, false
+            );
         }
 
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
@@ -2125,7 +2175,7 @@ public class ObjectWriterCreatorASM
         mwc.genIsEnabled(WriteNulls.mask | NullAsDefaultValue.mask | WriteNullListAsEmpty.mask, notNull_);
 
         // writeFieldName(w);
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         // jw.writeNulll
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
@@ -2146,23 +2196,22 @@ public class ObjectWriterCreatorASM
 
         if (fieldClass == boolean.class) {
             gwFieldValueBooleanV(mwc, fieldWriter, OBJECT, i, true);
-        } else if (fieldClass == boolean[].class) {
+        } else if (fieldClass == boolean[].class
+                || fieldClass == byte[].class
+                || fieldClass == char[].class
+                || fieldClass == short[].class
+                || fieldClass == float[].class
+                || fieldClass == double[].class
+        ) {
             gwFieldValueArray(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == char.class) {
-            gwFieldName(mwc, i);
+        } else if (fieldClass == char.class
+                || fieldClass == byte.class
+                || fieldClass == short.class
+                || fieldClass == float.class
+                || fieldClass == double.class
+        ) {
+            gwFieldName(mwc, fieldWriter, i);
             gwValue(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == char[].class) {
-            gwFieldValueArray(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == byte.class) {
-            gwFieldName(mwc, i);
-            gwValue(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == byte[].class) {
-            gwFieldValueArray(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == short.class) {
-            gwFieldName(mwc, i);
-            gwValue(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == short[].class) {
-            gwFieldValueArray(mwc, fieldWriter, OBJECT, i);
         } else if (fieldClass == int.class) {
             gwFieldValueInt32V(mwc, fieldWriter, OBJECT, i, true);
         } else if (fieldClass == int[].class) {
@@ -2173,16 +2222,6 @@ public class ObjectWriterCreatorASM
                 && mwc.provider.getObjectWriter(Long.class) == ObjectWriterImplInt64.INSTANCE
         ) {
             gwFieldValueInt64VA(mwc, fieldWriter, OBJECT, i, true);
-        } else if (fieldClass == float.class) {
-            gwFieldName(mwc, i);
-            gwValue(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == float[].class) {
-            gwFieldValueArray(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == double.class) {
-            gwFieldName(mwc, i);
-            gwValue(mwc, fieldWriter, OBJECT, i);
-        } else if (fieldClass == double[].class) {
-            gwFieldValueArray(mwc, fieldWriter, OBJECT, i);
         } else if (fieldClass == Integer.class) {
             gwInt32(mwc, fieldWriter, OBJECT, i);
         } else if (fieldClass == Long.class) {
@@ -2214,31 +2253,46 @@ public class ObjectWriterCreatorASM
 
         Label endIfNull_ = new Label(), notNull_ = new Label(), writeNullValue_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
 
         mw.visitJumpInsn(Opcodes.IFNONNULL, notNull_);
 
-        mwc.genIsEnabled(
-                WriteNulls.mask | NullAsDefaultValue.mask | WriteNullNumberAsZero.mask,
-                writeNullValue_,
-                endIfNull_
-        );
+        if ((fieldWriter.features & (WriteNulls.mask | NullAsDefaultValue.mask | WriteNullNumberAsZero.mask)) == 0) {
+            mwc.genIsEnabled(
+                    WriteNulls.mask | NullAsDefaultValue.mask | WriteNullNumberAsZero.mask,
+                    writeNullValue_,
+                    endIfNull_
+            );
 
-        mw.visitLabel(writeNullValue_);
+            mw.visitLabel(writeNullValue_);
 
-        gwFieldName(mwc, i);
+            gwFieldName(mwc, fieldWriter, i);
 
-        // TODO : if ((features & (JSONWriter.Feature.WriteNulls.mask | JSONWriter.Feature.NullAsEmpty.mask)) == 0) {
-        mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
-        mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "writeNumberNull", "()V", false);
+            mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
+            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "writeNumberNull", "()V", false);
+        } else {
+            long features = fieldWriter.features;
+            if ((features & (WriteNullNumberAsZero.mask | NullAsDefaultValue.mask)) != 0) {
+                gwFieldName(mwc, fieldWriter, i);
+
+                mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
+                mw.visitLdcInsn(0);
+                mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "writeInt32", "(I)V", false);
+            } else {  // (features & WriteNulls.mask) != 0
+                gwFieldName(mwc, fieldWriter, i);
+
+                mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
+                mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "writeNull", "()V", false);
+            }
+        }
 
         mw.visitJumpInsn(Opcodes.GOTO, endIfNull_);
 
         mw.visitLabel(notNull_);
 
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
 
@@ -2264,7 +2318,7 @@ public class ObjectWriterCreatorASM
 
         Label endIfNull_ = new Label(), notNull_ = new Label(), writeNullValue_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
 
@@ -2278,7 +2332,7 @@ public class ObjectWriterCreatorASM
 
         mw.visitLabel(writeNullValue_);
 
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
         mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "writeNumberNull", "()V", false);
@@ -2288,7 +2342,7 @@ public class ObjectWriterCreatorASM
         mw.visitLabel(notNull_);
 
         if (jsonb || (fieldWriter.features & (WriteNonStringValueAsString.mask | WriteLongAsString.mask | BrowserCompatible.mask)) == 0) {
-            gwFieldName(mwc, i);
+            gwFieldName(mwc, fieldWriter, i);
 
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
 
@@ -2325,7 +2379,7 @@ public class ObjectWriterCreatorASM
 
         Label endIfNull_ = new Label(), notNull_ = new Label(), writeNullValue_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
 
@@ -2339,7 +2393,7 @@ public class ObjectWriterCreatorASM
 
         mw.visitLabel(writeNullValue_);
 
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
         mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "writeNumberNull", "()V", false);
@@ -2349,7 +2403,7 @@ public class ObjectWriterCreatorASM
         mw.visitLabel(notNull_);
 
         if (jsonb) {
-            gwFieldName(mwc, i);
+            gwFieldName(mwc, fieldWriter, i);
 
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
 
@@ -2386,7 +2440,7 @@ public class ObjectWriterCreatorASM
 
         Label endIfNull_ = new Label(), notNull_ = new Label(), writeNullValue_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
 
@@ -2400,7 +2454,7 @@ public class ObjectWriterCreatorASM
 
         mw.visitLabel(writeNullValue_);
 
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
         mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "writeNumberNull", "()V", false);
@@ -2410,7 +2464,7 @@ public class ObjectWriterCreatorASM
         mw.visitLabel(notNull_);
 
         if (jsonb) {
-            gwFieldName(mwc, i);
+            gwFieldName(mwc, fieldWriter, i);
 
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
 
@@ -2453,7 +2507,7 @@ public class ObjectWriterCreatorASM
 
         Label endIfNull_ = new Label(), notNull_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
 
@@ -2494,12 +2548,12 @@ public class ObjectWriterCreatorASM
 
             int REF_DETECT = mwc.var("REF_DETECT");
 
-            mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
             if (fieldClass == Object.class) {
+                mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
                 mw.visitVarInsn(Opcodes.ALOAD, FIELD_VALUE);
                 mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "isRefDetect", "(Ljava/lang/Object;)Z", false);
             } else {
-                mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "isRefDetect", "()Z", false);
+                mwc.genIsEnabled(JSONWriter.Feature.ReferenceDetection.mask, null);
             }
             mw.visitInsn(Opcodes.DUP);
             mw.visitVarInsn(Opcodes.ISTORE, REF_DETECT);
@@ -2509,7 +2563,7 @@ public class ObjectWriterCreatorASM
             mw.visitVarInsn(Opcodes.ALOAD, FIELD_VALUE);
             mw.visitJumpInsn(Opcodes.IF_ACMPNE, refSetPath_);
 
-            gwFieldName(mwc, i);
+            gwFieldName(mwc, fieldWriter, i);
 
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
             mw.visitLdcInsn("..");
@@ -2528,7 +2582,7 @@ public class ObjectWriterCreatorASM
             mw.visitVarInsn(Opcodes.ASTORE, REF_PATH);
             mw.visitJumpInsn(Opcodes.IFNULL, endDetect_);
 
-            gwFieldName(mwc, i);
+            gwFieldName(mwc, fieldWriter, i);
 
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
             mw.visitVarInsn(Opcodes.ALOAD, REF_PATH);
@@ -2540,14 +2594,20 @@ public class ObjectWriterCreatorASM
             mw.visitJumpInsn(Opcodes.GOTO, endIfNull_);
 
             mw.visitLabel(endDetect_);
+
+            if ("this$0".equals(fieldName) || "this$1".equals(fieldName) || "this$2".equals(fieldName)) {
+                mw.visitVarInsn(Opcodes.ILOAD, REF_DETECT);
+                mw.visitJumpInsn(Opcodes.IFEQ, endIfNull_);
+            }
         }
 
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         // fw.getObjectWriter(w, value.getClass());
 
-        if (fieldClass == List.class && fieldWriter.getItemClass() == String.class) {
-            gwListStr(mwc, i, mw, fieldClass, FIELD_VALUE);
+        Class itemClass = fieldWriter.getItemClass();
+        if (fieldClass == List.class && (itemClass == String.class || itemClass == Integer.class || itemClass == Long.class)) {
+            gwListSimpleType(mwc, i, mw, fieldClass, itemClass, FIELD_VALUE);
         } else {
             mw.visitVarInsn(Opcodes.ALOAD, THIS);
             mw.visitFieldInsn(Opcodes.GETFIELD, mwc.classNameType, fieldWriter(i), DESC_FIELD_WRITER);
@@ -2587,11 +2647,12 @@ public class ObjectWriterCreatorASM
         mw.visitLabel(endIfNull_);
     }
 
-    private static void gwListStr(
+    private static void gwListSimpleType(
             MethodWriterContext mwc,
             int i,
             MethodWriter mw,
             Class<?> fieldClass,
+            Class itemClass,
             int FIELD_VALUE
     ) {
         if (mwc.jsonb) {
@@ -2607,59 +2668,28 @@ public class ObjectWriterCreatorASM
             );
         }
 
-        int LIST_SIZE = mwc.var("LIST_SIZE");
-        int LIST_ITEM = mwc.var("LIST_ITEM");
-        int J = mwc.var("J");
-
-        mw.visitVarInsn(Opcodes.ALOAD, FIELD_VALUE);
-        mw.visitMethodInsn(Opcodes.INVOKEINTERFACE, "java/util/List", "size", "()I", true);
-        mw.visitVarInsn(Opcodes.ISTORE, LIST_SIZE);
-
-        if (mwc.jsonb) {
+        if (itemClass == Integer.class) {
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
-            mw.visitVarInsn(Opcodes.ILOAD, LIST_SIZE);
-            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "startArray", "(I)V", false);
-        } else {
-            mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
-            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "startArray", "()V", false);
+            mw.visitVarInsn(Opcodes.ALOAD, FIELD_VALUE);
+            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "writeListInt32", "(Ljava/util/List;)V", false);
+            return;
         }
 
-        Label for_start_j_ = new Label(), for_end_j_ = new Label(), for_inc_j_ = new Label(), notFirst_ = new Label();
-        mw.visitInsn(Opcodes.ICONST_0);
-        mw.visitVarInsn(Opcodes.ISTORE, J);
-
-        mw.visitLabel(for_start_j_);
-        mw.visitVarInsn(Opcodes.ILOAD, J);
-        mw.visitVarInsn(Opcodes.ILOAD, LIST_SIZE);
-        mw.visitJumpInsn(Opcodes.IF_ICMPGE, for_end_j_);
-
-        if (!mwc.jsonb) {
-            mw.visitVarInsn(Opcodes.ILOAD, J);
-            mw.visitJumpInsn(Opcodes.IFEQ, notFirst_);
-
+        if (itemClass == Long.class) {
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
-            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "writeComma", "()V", false);
-            mw.visitLabel(notFirst_);
+            mw.visitVarInsn(Opcodes.ALOAD, FIELD_VALUE);
+            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "writeListInt64", "(Ljava/util/List;)V", false);
+            return;
         }
 
-        mw.visitVarInsn(Opcodes.ALOAD, FIELD_VALUE);
-        mw.visitVarInsn(Opcodes.ILOAD, J);
-        mw.visitMethodInsn(Opcodes.INVOKEINTERFACE, "java/util/List", "get", "(I)Ljava/lang/Object;", true);
-        mw.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/String"); // cast
-        mw.visitVarInsn(Opcodes.ASTORE, LIST_ITEM);
-
-        gwString(mwc, false, true, LIST_ITEM);
-
-        mw.visitLabel(for_inc_j_);
-        mw.visitIincInsn(J, 1);
-        mw.visitJumpInsn(Opcodes.GOTO, for_start_j_);
-
-        mw.visitLabel(for_end_j_);
-
-        if (!mwc.jsonb) {
+        if (itemClass == String.class) {
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
-            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "endArray", "()V", false);
+            mw.visitVarInsn(Opcodes.ALOAD, FIELD_VALUE);
+            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "writeString", "(Ljava/util/List;)V", false);
+            return;
         }
+
+        throw new JSONException("TOOD " + itemClass.getName());
     }
 
     static void gwString(MethodWriterContext mwc, boolean symbol, boolean checkNull, int STR) {
@@ -2676,9 +2706,7 @@ public class ObjectWriterCreatorASM
             mw.visitLabel(notNull_);
         }
 
-        if ((!DISABLE_STRING_UNSAFE_GET)
-                && JVM_VERSION == 8
-                && UNSAFE_SUPPORT
+        if (JVM_VERSION == 8
                 && !OPENJ9
                 && !FIELD_STRING_VALUE_ERROR
                 && !symbol
@@ -2696,9 +2724,7 @@ public class ObjectWriterCreatorASM
                     "([C)V",
                     false
             );
-        } else if ((!DISABLE_STRING_UNSAFE_GET)
-                && JVM_VERSION > 8
-                && UNSAFE_SUPPORT
+        } else if (JVM_VERSION > 8
                 && !OPENJ9
                 && FIELD_STRING_CODER_OFFSET != -1
                 && FIELD_STRING_VALUE_OFFSET != -1
@@ -2765,7 +2791,7 @@ public class ObjectWriterCreatorASM
 
         int FIELD_VALUE = mwc.var(fieldClass);
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
         mw.visitJumpInsn(Opcodes.IFNULL, null_);
@@ -2789,7 +2815,7 @@ public class ObjectWriterCreatorASM
         }
 
         mw.visitLabel(writeNull_);
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         // jw.writeNulll
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
@@ -2831,18 +2857,216 @@ public class ObjectWriterCreatorASM
         mw.visitVarInsn(Opcodes.ALOAD, THIS);
         mw.visitFieldInsn(Opcodes.GETFIELD, mwc.classNameType, fieldWriter(i), DESC_FIELD_WRITER);
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_FIELD_WRITER, methodName, methodDesc, false);
     }
 
-    private void gwFieldName(MethodWriterContext mwc, int i) {
+    private void gwFieldName(MethodWriterContext mwc, FieldWriter fieldWriter, int i) {
         MethodWriter mw = mwc.mw;
         String classNameType = mwc.classNameType;
+
+        Label labelElse = new Label(), labelEnd = new Label();
+        boolean writeDirect = false;
+        if (!mwc.jsonb) {
+            byte[] fieldNameUTF8 = fieldWriter.fieldName.getBytes(StandardCharsets.UTF_8);
+            int length = fieldNameUTF8.length;
+            if (length >= 2 && length <= 15) {
+                writeDirect = true;
+
+                Number name1 = 0;
+                String methodName;
+                String methodDesc = "(J)V";
+                byte[] bytes = new byte[8];
+                switch (length) {
+                    case 2:
+                        bytes[0] = '"';
+                        System.arraycopy(fieldNameUTF8, 0, bytes, 1, 2);
+                        bytes[3] = '"';
+                        bytes[4] = ':';
+                        methodName = "writeName2Raw";
+                        break;
+                    case 3:
+                        bytes[0] = '"';
+                        System.arraycopy(fieldNameUTF8, 0, bytes, 1, 3);
+                        bytes[4] = '"';
+                        bytes[5] = ':';
+                        methodName = "writeName3Raw";
+                        break;
+                    case 4:
+                        bytes[0] = '"';
+                        System.arraycopy(fieldNameUTF8, 0, bytes, 1, 4);
+                        bytes[5] = '"';
+                        bytes[6] = ':';
+                        methodName = "writeName4Raw";
+                        break;
+                    case 5:
+                        bytes[0] = '"';
+                        System.arraycopy(fieldNameUTF8, 0, bytes, 1, 5);
+                        bytes[6] = '"';
+                        bytes[7] = ':';
+                        methodName = "writeName5Raw";
+                        break;
+                    case 6:
+                        bytes[0] = '"';
+                        System.arraycopy(fieldNameUTF8, 0, bytes, 1, 6);
+                        bytes[7] = '"';
+                        methodName = "writeName6Raw";
+                        break;
+                    case 7:
+                        bytes[0] = '"';
+                        System.arraycopy(fieldNameUTF8, 0, bytes, 1, 7);
+                        methodName = "writeName7Raw";
+                        break;
+                    case 8: {
+                        bytes = fieldNameUTF8;
+                        methodName = "writeName8Raw";
+                        break;
+                    }
+                    case 9: {
+                        bytes[0] = '"';
+                        System.arraycopy(fieldNameUTF8, 0, bytes, 1, 7);
+                        methodDesc = "(JI)V";
+                        byte[] name1Bytes = new byte[4];
+                        name1Bytes[0] = fieldNameUTF8[7];
+                        name1Bytes[1] = fieldNameUTF8[8];
+                        name1Bytes[2] = '"';
+                        name1Bytes[3] = ':';
+                        name1 = UNSAFE.getInt(name1Bytes, ARRAY_BYTE_BASE_OFFSET);
+                        methodName = "writeName9Raw";
+                        break;
+                    }
+                    case 10: {
+                        bytes[0] = '"';
+                        System.arraycopy(fieldNameUTF8, 0, bytes, 1, 7);
+                        methodDesc = "(JJ)V";
+                        byte[] name1Bytes = new byte[8];
+                        name1Bytes[0] = fieldNameUTF8[7];
+                        name1Bytes[1] = fieldNameUTF8[8];
+                        name1Bytes[2] = fieldNameUTF8[9];
+                        name1Bytes[3] = '"';
+                        name1Bytes[4] = ':';
+                        name1 = UNSAFE.getLong(name1Bytes, ARRAY_BYTE_BASE_OFFSET);
+                        methodName = "writeName10Raw";
+                        break;
+                    }
+                    case 11: {
+                        bytes[0] = '"';
+                        System.arraycopy(fieldNameUTF8, 0, bytes, 1, 7);
+                        methodDesc = "(JJ)V";
+                        byte[] name1Bytes = new byte[8];
+                        name1Bytes[0] = fieldNameUTF8[7];
+                        name1Bytes[1] = fieldNameUTF8[8];
+                        name1Bytes[2] = fieldNameUTF8[9];
+                        name1Bytes[3] = fieldNameUTF8[10];
+                        name1Bytes[4] = '"';
+                        name1Bytes[5] = ':';
+                        name1 = UNSAFE.getLong(name1Bytes, ARRAY_BYTE_BASE_OFFSET);
+                        methodName = "writeName11Raw";
+                        break;
+                    }
+                    case 12: {
+                        bytes[0] = '"';
+                        System.arraycopy(fieldNameUTF8, 0, bytes, 1, 7);
+                        methodDesc = "(JJ)V";
+                        byte[] name1Bytes = new byte[8];
+                        name1Bytes[0] = fieldNameUTF8[7];
+                        name1Bytes[1] = fieldNameUTF8[8];
+                        name1Bytes[2] = fieldNameUTF8[9];
+                        name1Bytes[3] = fieldNameUTF8[10];
+                        name1Bytes[4] = fieldNameUTF8[11];
+                        name1Bytes[5] = '"';
+                        name1Bytes[6] = ':';
+                        name1 = UNSAFE.getLong(name1Bytes, ARRAY_BYTE_BASE_OFFSET);
+                        methodName = "writeName12Raw";
+                        break;
+                    }
+                    case 13: {
+                        bytes[0] = '"';
+                        System.arraycopy(fieldNameUTF8, 0, bytes, 1, 7);
+                        methodDesc = "(JJ)V";
+                        byte[] name1Bytes = new byte[8];
+                        name1Bytes[0] = fieldNameUTF8[7];
+                        name1Bytes[1] = fieldNameUTF8[8];
+                        name1Bytes[2] = fieldNameUTF8[9];
+                        name1Bytes[3] = fieldNameUTF8[10];
+                        name1Bytes[4] = fieldNameUTF8[11];
+                        name1Bytes[5] = fieldNameUTF8[12];
+                        name1Bytes[6] = '"';
+                        name1Bytes[7] = ':';
+                        name1 = UNSAFE.getLong(name1Bytes, ARRAY_BYTE_BASE_OFFSET);
+                        methodName = "writeName13Raw";
+                        break;
+                    }
+                    case 14: {
+                        bytes[0] = '"';
+                        System.arraycopy(fieldNameUTF8, 0, bytes, 1, 7);
+                        methodDesc = "(JJ)V";
+                        byte[] name1Bytes = new byte[8];
+                        name1Bytes[0] = fieldNameUTF8[7];
+                        name1Bytes[1] = fieldNameUTF8[8];
+                        name1Bytes[2] = fieldNameUTF8[9];
+                        name1Bytes[3] = fieldNameUTF8[10];
+                        name1Bytes[4] = fieldNameUTF8[11];
+                        name1Bytes[5] = fieldNameUTF8[12];
+                        name1Bytes[6] = fieldNameUTF8[13];
+                        name1Bytes[7] = '"';
+                        name1 = UNSAFE.getLong(name1Bytes, ARRAY_BYTE_BASE_OFFSET);
+                        methodName = "writeName14Raw";
+                        break;
+                    }
+                    case 15: {
+                        bytes[0] = '"';
+                        System.arraycopy(fieldNameUTF8, 0, bytes, 1, 7);
+                        methodDesc = "(JJ)V";
+                        name1 = UNSAFE.getLong(fieldNameUTF8, ARRAY_BYTE_BASE_OFFSET + 7);
+                        methodName = "writeName15Raw";
+                        break;
+                    }
+                    default:
+                        throw new IllegalStateException("length : " + length);
+                }
+                long nameIn64 = UNSAFE.getLong(bytes, ARRAY_BYTE_BASE_OFFSET);
+
+                mw.visitVarInsn(Opcodes.ILOAD, mwc.var(UTF8_DIRECT));
+                mw.visitJumpInsn(Opcodes.IFEQ, labelElse);
+
+                mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
+                mw.visitLdcInsn(nameIn64);
+                if ("(JI)V".equals(methodDesc)) {
+                    mw.visitLdcInsn(name1.intValue());
+                } else if ("(JJ)V".equals(methodDesc)) {
+                    mw.visitLdcInsn(name1.longValue());
+                }
+                mw.visitMethodInsn(
+                        Opcodes.INVOKEVIRTUAL,
+                        TYPE_JSON_WRITER,
+                        methodName,
+                        methodDesc,
+                        false
+                );
+
+                mw.visitJumpInsn(Opcodes.GOTO, labelEnd);
+            }
+        }
+
+        if (writeDirect) {
+            mw.visitLabel(labelElse);
+        }
 
         mw.visitVarInsn(Opcodes.ALOAD, THIS);
         mw.visitFieldInsn(Opcodes.GETFIELD, classNameType, fieldWriter(i), DESC_FIELD_WRITER);
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
-        mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_FIELD_WRITER, "writeFieldName", METHOD_DESC_WRITE_FIELD_NAME, false);
+        mw.visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                TYPE_FIELD_WRITER,
+                mwc.jsonb ? "writeFieldNameJSONB" : "writeFieldName",
+                METHOD_DESC_WRITE_FIELD_NAME,
+                false
+        );
+
+        if (writeDirect) {
+            mw.visitLabel(labelEnd);
+        }
     }
 
     private void gwFieldValueInt64VA(
@@ -2859,7 +3083,7 @@ public class ObjectWriterCreatorASM
 
         Label endIfNull_ = new Label(), notNull_ = new Label(), writeNullValue_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
 
@@ -2872,7 +3096,7 @@ public class ObjectWriterCreatorASM
 
         mw.visitLabel(writeNullValue_);
 
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         // TODO if ((features & (JSONWriter.Feature.WriteNulls.mask | JSONWriter.Feature.NullAsEmpty.mask)) == 0) {
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
@@ -2882,7 +3106,7 @@ public class ObjectWriterCreatorASM
 
         mw.visitLabel(notNull_);
 
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
         mw.visitVarInsn(Opcodes.ALOAD, FIELD_VALUE);
@@ -2906,19 +3130,20 @@ public class ObjectWriterCreatorASM
         int WRITE_DEFAULT_VALUE = mwc.var(NOT_WRITE_DEFAULT_VALUE);
         Label notDefaultValue_ = new Label(), endWriteValue_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP2);
         mw.visitVarInsn(Opcodes.LSTORE, FIELD_VALUE);
         mw.visitInsn(Opcodes.LCONST_0);
         mw.visitInsn(Opcodes.LCMP);
         mw.visitJumpInsn(Opcodes.IFNE, notDefaultValue_);
 
-        mw.visitVarInsn(Opcodes.ILOAD, WRITE_DEFAULT_VALUE);
-        mw.visitJumpInsn(Opcodes.IFEQ, notDefaultValue_);
-
-        mw.visitJumpInsn(Opcodes.GOTO, endWriteValue_);
-
+        if (fieldWriter.defaultValue == null) {
+            mw.visitVarInsn(Opcodes.ILOAD, WRITE_DEFAULT_VALUE);
+            mw.visitJumpInsn(Opcodes.IFEQ, notDefaultValue_);
+            mw.visitJumpInsn(Opcodes.GOTO, endWriteValue_);
+        }
         mw.visitLabel(notDefaultValue_);
+
         boolean iso8601 = "iso8601".equals(format);
         if (iso8601 || (fieldWriter.features & (WriteNonStringValueAsString.mask | WriteLongAsString.mask | BrowserCompatible.mask)) != 0) {
             mw.visitVarInsn(Opcodes.ALOAD, THIS);
@@ -2935,7 +3160,7 @@ public class ObjectWriterCreatorASM
                     false
             );
         } else {
-            gwFieldName(mwc, i);
+            gwFieldName(mwc, fieldWriter, i);
 
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
             mw.visitVarInsn(Opcodes.LLOAD, FIELD_VALUE);
@@ -2959,7 +3184,7 @@ public class ObjectWriterCreatorASM
 
         Label endIfNull_ = new Label(), notNull_ = new Label(), writeNullValue_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
 
@@ -2972,7 +3197,7 @@ public class ObjectWriterCreatorASM
 
         mw.visitLabel(writeNullValue_);
 
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         // TODO if ((features & (JSONWriter.Feature.WriteNulls.mask | JSONWriter.Feature.NullAsEmpty.mask)) == 0) {
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
@@ -2982,7 +3207,7 @@ public class ObjectWriterCreatorASM
 
         mw.visitLabel(notNull_);
 
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
         mw.visitVarInsn(Opcodes.ALOAD, FIELD_VALUE);
@@ -3006,19 +3231,19 @@ public class ObjectWriterCreatorASM
         int WRITE_DEFAULT_VALUE = mwc.var(NOT_WRITE_DEFAULT_VALUE);
         Label notDefaultValue_ = new Label(), endWriteValue_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ISTORE, FIELD_VALUE);
         mw.visitJumpInsn(Opcodes.IFNE, notDefaultValue_);
 
-        mw.visitVarInsn(Opcodes.ILOAD, WRITE_DEFAULT_VALUE);
-        mw.visitJumpInsn(Opcodes.IFEQ, notDefaultValue_);
-
-        mw.visitJumpInsn(Opcodes.GOTO, endWriteValue_);
-
+        if (fieldWriter.defaultValue == null) {
+            mw.visitVarInsn(Opcodes.ILOAD, WRITE_DEFAULT_VALUE);
+            mw.visitJumpInsn(Opcodes.IFEQ, notDefaultValue_);
+            mw.visitJumpInsn(Opcodes.GOTO, endWriteValue_);
+        }
         mw.visitLabel(notDefaultValue_);
 
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
         mw.visitVarInsn(Opcodes.ILOAD, FIELD_VALUE);
@@ -3053,16 +3278,16 @@ public class ObjectWriterCreatorASM
         int WRITE_DEFAULT_VALUE = mwc.var(NOT_WRITE_DEFAULT_VALUE);
         Label notDefaultValue_ = new Label(), endWriteValue_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ISTORE, FIELD_VALUE);
         mw.visitJumpInsn(Opcodes.IFNE, notDefaultValue_);
 
-        mw.visitVarInsn(Opcodes.ILOAD, WRITE_DEFAULT_VALUE);
-        mw.visitJumpInsn(Opcodes.IFEQ, notDefaultValue_);
-
-        mw.visitJumpInsn(Opcodes.GOTO, endWriteValue_);
-
+        if (fieldWriter.defaultValue == null) {
+            mw.visitVarInsn(Opcodes.ILOAD, WRITE_DEFAULT_VALUE);
+            mw.visitJumpInsn(Opcodes.IFEQ, notDefaultValue_);
+            mw.visitJumpInsn(Opcodes.GOTO, endWriteValue_);
+        }
         mw.visitLabel(notDefaultValue_);
 
         mw.visitVarInsn(Opcodes.ALOAD, THIS);
@@ -3090,7 +3315,7 @@ public class ObjectWriterCreatorASM
 
         Label null_ = new Label(), endIfNull_ = new Label();
 
-        genGetObject(mwc, fieldWriter, OBJECT);
+        genGetObject(mwc, fieldWriter, i, OBJECT);
 
         mw.visitInsn(Opcodes.DUP);
         mw.visitVarInsn(Opcodes.ASTORE, FIELD_VALUE);
@@ -3098,7 +3323,7 @@ public class ObjectWriterCreatorASM
         mw.visitJumpInsn(Opcodes.IFNULL, null_);
 
         // void writeFieldName(JSONWriter w)
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         if ("trim".equals(format)) {
             mw.visitVarInsn(Opcodes.ALOAD, FIELD_VALUE);
@@ -3131,10 +3356,13 @@ public class ObjectWriterCreatorASM
         }
 
         mw.visitLabel(writeNull_);
-        mwc.genIsDisabled(NotWriteDefaultValue.mask, endIfNull_);
+
+        if (fieldWriter.defaultValue == null) {
+            mwc.genIsDisabled(NotWriteDefaultValue.mask, endIfNull_);
+        }
 
         // writeFieldName(w);
-        gwFieldName(mwc, i);
+        gwFieldName(mwc, fieldWriter, i);
 
         if ((features & defaultValueMask) == 0) {
             long mask = NullAsDefaultValue.mask;
@@ -3397,7 +3625,7 @@ public class ObjectWriterCreatorASM
             if (declaringClass == Throwable.class && "stackTrace".equals(fieldName)) {
                 try {
                     Method method = Throwable.class.getMethod("getStackTrace");
-                    return new FieldWriterObjectArrayMethod(fieldName, itemClass, ordinal, features, format, label, fieldType, fieldClass, method);
+                    return new FieldWriterObjectArrayMethod(fieldName, itemClass, ordinal, features, format, label, fieldType, fieldClass, field, method);
                 } catch (NoSuchMethodException ignored) {
                 }
             }
@@ -3427,12 +3655,23 @@ public class ObjectWriterCreatorASM
         return new FieldWriterObject(fieldName, ordinal, features, format, label, field.getGenericType(), fieldClass, field, null);
     }
 
-    void genGetObject(MethodWriterContext mwc, FieldWriter fieldWriter, int OBJECT) {
+    void genGetObject(MethodWriterContext mwc, FieldWriter fieldWriter, int i, int OBJECT) {
         MethodWriter mw = mwc.mw;
         Class objectClass = mwc.objectClass;
-        final String TYPE_OBJECT = ASMUtils.type(objectClass);
+        final String TYPE_OBJECT = objectClass == null ? "java/lang/Object" : ASMUtils.type(objectClass);
         Class fieldClass = fieldWriter.fieldClass;
-        Member member = fieldWriter.field != null ? fieldWriter.field : fieldWriter.method;
+        Member member = fieldWriter.method != null ? fieldWriter.method : fieldWriter.field;
+        Function function = fieldWriter.getFunction();
+
+        if (member == null && function != null) {
+            mw.visitVarInsn(Opcodes.ALOAD, THIS);
+            mw.visitFieldInsn(Opcodes.GETFIELD, mwc.classNameType, fieldWriter(i), DESC_FIELD_WRITER);
+            mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_FIELD_WRITER, "getFunction", "()Ljava/util/function/Function;", false);
+            mw.visitVarInsn(Opcodes.ALOAD, OBJECT);
+            mw.visitMethodInsn(Opcodes.INVOKEINTERFACE, type(Function.class), "apply", "(Ljava/lang/Object;)Ljava/lang/Object;", true);
+            mw.visitTypeInsn(Opcodes.CHECKCAST, type(fieldClass));
+            return;
+        }
 
         if (member instanceof Method) {
             mw.visitVarInsn(Opcodes.ALOAD, OBJECT);
@@ -3499,7 +3738,7 @@ public class ObjectWriterCreatorASM
         mw.visitFieldInsn(Opcodes.GETSTATIC, ObjectWriterCreatorASMUtils.TYPE_UNSAFE_UTILS, "UNSAFE", "Lsun/misc/Unsafe;");
         mw.visitVarInsn(Opcodes.ALOAD, OBJECT);
         mw.visitLdcInsn(
-                UnsafeUtils.objectFieldOffset(field));
+                UNSAFE.objectFieldOffset(field));
         mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "sun/misc/Unsafe", methodName, methodDes, false);
         if (castToType != null) {
             mw.visitTypeInsn(Opcodes.CHECKCAST, castToType);
@@ -3558,12 +3797,36 @@ public class ObjectWriterCreatorASM
             return var;
         }
 
-        void genVariantsMethodBefore() {
+        void genVariantsMethodBefore(boolean jsonb) {
             Label notDefault_ = new Label(), end_ = new Label();
 
             mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
             mw.visitMethodInsn(Opcodes.INVOKEVIRTUAL, TYPE_JSON_WRITER, "getFeatures", "()J", false);
             mw.visitVarInsn(Opcodes.LSTORE, var2(CONTEXT_FEATURES));
+
+            if (!jsonb) {
+                Label l1 = new Label(), l2 = new Label();
+
+                mw.visitVarInsn(Opcodes.ALOAD, JSON_WRITER);
+                mw.visitFieldInsn(Opcodes.GETFIELD, TYPE_JSON_WRITER, "utf8", "Z");
+                mw.visitJumpInsn(Opcodes.IFEQ, l1);
+
+                mw.visitVarInsn(Opcodes.LLOAD, var2(CONTEXT_FEATURES));
+                mw.visitLdcInsn(UnquoteFieldName.mask | UseSingleQuotes.mask);
+                mw.visitInsn(Opcodes.LAND);
+                mw.visitInsn(Opcodes.LCONST_0);
+                mw.visitInsn(Opcodes.LCMP);
+                mw.visitJumpInsn(Opcodes.IFNE, l1);
+                mw.visitInsn(Opcodes.ICONST_1);
+                mw.visitJumpInsn(Opcodes.GOTO, l2);
+
+                mw.visitLabel(l1);
+                mw.visitInsn(Opcodes.ICONST_0);
+
+                mw.visitLabel(l2);
+                mw.visitVarInsn(Opcodes.ISTORE, var2(UTF8_DIRECT));
+            }
+            // UTF8_DIRECT
 
             genIsEnabledAndAssign(NotWriteDefaultValue.mask, var(NOT_WRITE_DEFAULT_VALUE));
             mw.visitVarInsn(Opcodes.ILOAD, var(NOT_WRITE_DEFAULT_VALUE));
@@ -3589,7 +3852,9 @@ public class ObjectWriterCreatorASM
             mw.visitInsn(Opcodes.LAND);
             mw.visitInsn(Opcodes.LCONST_0);
             mw.visitInsn(Opcodes.LCMP);
-            mw.visitJumpInsn(Opcodes.IFEQ, elseLabel);
+            if (elseLabel != null) {
+                mw.visitJumpInsn(Opcodes.IFEQ, elseLabel);
+            }
         }
 
         void genIsDisabled(long features, Label elseLabel) {

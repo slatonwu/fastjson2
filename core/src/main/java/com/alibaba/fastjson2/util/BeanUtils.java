@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.*;
 import java.util.function.Consumer;
 
+import static com.alibaba.fastjson2.util.JDKUtils.ANDROID_SDK_INT;
 import static com.alibaba.fastjson2.util.JDKUtils.JVM_VERSION;
 
 /**
@@ -54,13 +55,14 @@ public abstract class BeanUtils {
             1616814008855344660L,
             2164749833121980361L,
             3724195282986200606L,
+            3977020351318456359L, // sun.nio.ch.FileChannelImpl
             4882459834864833642L,
             7981148566008458638L,
-            8344106065386396833L
+            8344106065386396833L,
     };
 
     public static String[] getRecordFieldNames(Class<?> recordType) {
-        if (JVM_VERSION < 14) {
+        if (JVM_VERSION < 14 && ANDROID_SDK_INT < 33) {
             return new String[0];
         }
 
@@ -86,123 +88,6 @@ public abstract class BeanUtils {
                     "Failed to access Methods needed to support `java.lang.Record`: (%s) %s",
                     e.getClass().getName(), e.getMessage()), e);
         }
-    }
-
-    public static void getKotlinConstructor(Class<?> objectClass, BeanInfo beanInfo) {
-        Constructor<?>[] constructors = constructorCache.get(objectClass);
-        if (constructors == null) {
-            constructors = objectClass.getDeclaredConstructors();
-            constructorCache.putIfAbsent(objectClass, constructors);
-        }
-
-        Constructor<?> creatorConstructor = null;
-        String[] paramNames = beanInfo.createParameterNames;
-
-        for (Constructor<?> constructor : constructors) {
-            int parameterCount = constructor.getParameterCount();
-            if (paramNames != null && parameterCount != paramNames.length) {
-                continue;
-            }
-
-            if (parameterCount > 2) {
-                Class<?>[] parameterTypes = constructor.getParameterTypes();
-                if (parameterTypes[parameterCount - 2] == int.class &&
-                        "kotlin.jvm.internal.DefaultConstructorMarker".equals(parameterTypes[parameterCount - 1].getName())
-                ) {
-                    beanInfo.markerConstructor = constructor;
-                    continue;
-                }
-            }
-
-            if (creatorConstructor != null && creatorConstructor.getParameterCount() >= parameterCount) {
-                continue;
-            }
-
-            creatorConstructor = constructor;
-        }
-
-        beanInfo.creatorConstructor = creatorConstructor;
-    }
-
-    private static volatile boolean kotlinClassKlassError;
-    private static volatile Constructor<?> kotlinKClassConstructor;
-    private static volatile Method kotlinKClassGetConstructors;
-    private static volatile Method kotlinKFunctionGetParameters;
-    private static volatile Method kotlinKParameterGetName;
-    private static volatile boolean kotlinError;
-
-    public static String[] getKotlinConstructorParameters(Class<?> clazz) {
-        if (kotlinKClassConstructor == null && !kotlinClassKlassError) {
-            try {
-                Class<?> classKotlinKClass = Class.forName("kotlin.reflect.jvm.internal.KClassImpl");
-                kotlinKClassConstructor = classKotlinKClass.getConstructor(Class.class);
-            } catch (Throwable e) {
-                kotlinClassKlassError = true;
-            }
-        }
-        if (kotlinKClassConstructor == null) {
-            return null;
-        }
-
-        if (kotlinKClassGetConstructors == null && !kotlinClassKlassError) {
-            try {
-                Class<?> classKotlinKClass = Class.forName("kotlin.reflect.jvm.internal.KClassImpl");
-                kotlinKClassGetConstructors = classKotlinKClass.getMethod("getConstructors");
-            } catch (Throwable e) {
-                kotlinClassKlassError = true;
-            }
-        }
-
-        if (kotlinKFunctionGetParameters == null && !kotlinClassKlassError) {
-            try {
-                Class<?> classKotlinKFunction = Class.forName("kotlin.reflect.KFunction");
-                kotlinKFunctionGetParameters = classKotlinKFunction.getMethod("getParameters");
-            } catch (Throwable e) {
-                kotlinClassKlassError = true;
-            }
-        }
-
-        if (kotlinKParameterGetName == null && !kotlinClassKlassError) {
-            try {
-                Class<?> classKotlinKParameter = Class.forName("kotlin.reflect.KParameter");
-                kotlinKParameterGetName = classKotlinKParameter.getMethod("getName");
-            } catch (Throwable e) {
-                kotlinClassKlassError = true;
-            }
-        }
-
-        if (kotlinError) {
-            return null;
-        }
-
-        try {
-            Object constructor = null;
-            Object classImpl = kotlinKClassConstructor.newInstance(clazz);
-            Iterable it = (Iterable) kotlinKClassGetConstructors.invoke(classImpl);
-            for (Iterator iterator = it.iterator(); iterator.hasNext(); iterator.hasNext()) {
-                Object item = iterator.next();
-                List parameters = (List) kotlinKFunctionGetParameters.invoke(item);
-                if (constructor != null && parameters.size() == 0) {
-                    continue;
-                }
-                constructor = item;
-            }
-
-            if (constructor == null) {
-                return null;
-            }
-
-            List parameters = (List) kotlinKFunctionGetParameters.invoke(constructor);
-            String[] names = new String[parameters.size()];
-            for (int i = 0; i < parameters.size(); i++) {
-                Object param = parameters.get(i);
-                names[i] = (String) kotlinKParameterGetName.invoke(param);
-            }
-            return names;
-        } catch (Throwable ignored) {
-            kotlinError = true;
-        }
-        return null;
     }
 
     public static void fields(Class objectClass, Consumer<Field> fieldReaders) {
@@ -238,6 +123,26 @@ public abstract class BeanUtils {
 
         for (Method method : methods) {
             if (method.getName().equals(methodName)) {
+                return method;
+            }
+        }
+
+        return null;
+    }
+
+    public static Method fluentSetter(Class objectClass, String methodName, Class paramType) {
+        Method[] methods = methodCache.get(objectClass);
+        if (methods == null) {
+            methods = getMethods(objectClass);
+            methodCache.putIfAbsent(objectClass, methods);
+        }
+
+        for (Method method : methods) {
+            if (method.getName().equals(methodName)
+                    && method.getReturnType() == objectClass
+                    && method.getParameterCount() == 1
+                    && method.getParameterTypes()[0] == paramType
+            ) {
                 return method;
             }
         }
@@ -316,7 +221,7 @@ public abstract class BeanUtils {
             return;
         }
 
-        if (ignore(objectClass)) {
+        if (ignore(objectClass) || objectClass.getName().contains("$$Lambda")) {
             return;
         }
 
@@ -332,7 +237,7 @@ public abstract class BeanUtils {
         if (superClass != null
                 && superClass != Object.class
         ) {
-            protobufMessageV3 = superClass.getName().equals("com.google.protobuf.GeneratedMessageV3");
+            protobufMessageV3 = "com.google.protobuf.GeneratedMessageV3".equals(superClass.getName());
             if (!protobufMessageV3) {
                 declaredFields(superClass, fieldConsumer);
             }
@@ -340,7 +245,7 @@ public abstract class BeanUtils {
 
         Field[] fields = declaredFieldCache.get(objectClass);
         if (fields == null) {
-            Field[] declaredFields = null;
+            Field[] declaredFields;
             try {
                 declaredFields = objectClass.getDeclaredFields();
                 declaredFieldCache.put(objectClass, declaredFields);
@@ -384,7 +289,7 @@ public abstract class BeanUtils {
                 String fieldName = field.getName();
                 Class<?> fieldClass = field.getType();
                 if ("cardsmap_".equals(fieldName)
-                        && fieldClass.getName().equals("com.google.protobuf.MapField")) {
+                        && "com.google.protobuf.MapField".equals(fieldClass.getName())) {
                     return;
                 }
             }
@@ -452,7 +357,11 @@ public abstract class BeanUtils {
             constructorCache.putIfAbsent(objectClass, constructors);
         }
 
+        boolean record = isRecord(objectClass);
         for (Constructor constructor : constructors) {
+            if (record && constructor.getParameterCount() == 0) {
+                continue;
+            }
             constructorConsumer.accept(constructor);
         }
     }
@@ -467,8 +376,13 @@ public abstract class BeanUtils {
         return constructors;
     }
 
+    public static boolean hasPublicDefaultConstructor(Class objectClass) {
+        Constructor constructor = getDefaultConstructor(objectClass, false);
+        return constructor != null && Modifier.isPublic(constructor.getModifiers());
+    }
+
     public static Constructor getDefaultConstructor(Class objectClass, boolean includeNoneStaticMember) {
-        if (objectClass == StackTraceElement.class && JVM_VERSION >= 9) {
+        if ((objectClass == StackTraceElement.class && JVM_VERSION >= 9) || (isRecord(objectClass))) {
             return null;
         }
 
@@ -546,6 +460,7 @@ public abstract class BeanUtils {
             }
 
             int paramCount = method.getParameterCount();
+            Class<?> returnType = method.getReturnType();
 
             // read only getter
             if (paramCount == 0) {
@@ -553,7 +468,6 @@ public abstract class BeanUtils {
                     continue;
                 }
 
-                Class<?> returnType = method.getReturnType();
                 if (returnType == AtomicInteger.class
                         || returnType == AtomicLong.class
                         || returnType == AtomicBoolean.class
@@ -609,7 +523,7 @@ public abstract class BeanUtils {
             }
 
             final int methodNameLength = methodName.length();
-            boolean nameMatch = methodNameLength > 3 && methodName.startsWith("set");
+            boolean nameMatch = methodNameLength > 3 && (methodName.startsWith("set") || returnType == objectClass);
             if (!nameMatch) {
                 if (mixin != null) {
                     Method mixinMethod = getMethod(mixin, method);
@@ -816,7 +730,7 @@ public abstract class BeanUtils {
             }
 
             String methodName = method.getName();
-            if (methodName.equals("values")) {
+            if ("values".equals(methodName)) {
                 continue;
             }
 
@@ -936,7 +850,7 @@ public abstract class BeanUtils {
             methodCache.putIfAbsent(objectClass, methods);
         }
 
-        boolean protobufMessageV3 = superClass != null && superClass.getName().equals("com.google.protobuf.GeneratedMessageV3");
+        boolean protobufMessageV3 = superClass != null && "com.google.protobuf.GeneratedMessageV3".equals(superClass.getName());
 
         for (Method method : methods) {
             int paramType = method.getParameterCount();
@@ -985,7 +899,7 @@ public abstract class BeanUtils {
 
             if (protobufMessageV3) {
                 if ((methodName.endsWith("Type") || methodName.endsWith("Bytes"))
-                        && returnClass.getName().equals("com.google.protobuf.ByteString")) {
+                        && "com.google.protobuf.ByteString".equals(returnClass.getName())) {
                     continue;
                 }
             }
@@ -1063,6 +977,10 @@ public abstract class BeanUtils {
                         nameMatch = true;
                     }
                 }
+            }
+
+            if (!nameMatch && fluentSetter(objectClass, methodName, returnClass) != null) {
+                nameMatch = true;
             }
 
             if (!nameMatch) {
@@ -1289,7 +1207,16 @@ public abstract class BeanUtils {
             });
         }
 
-        return fields[0] != null ? fields[0] : fields[1];
+        Field field = fields[0] != null ? fields[0] : fields[1];
+        if (Throwable.class.isAssignableFrom(objectClass)) {
+            if (returnType == String.class && (field == null && "getMessage".equals(methodName) || field == null && "getLocalizedMessage".equals(methodName))) {
+                field = getDeclaredField(objectClass, "detailMessage");
+            } else if (returnType == Throwable[].class && "getSuppressed".equals(methodName)) {
+                field = getDeclaredField(objectClass, "suppressedExceptions");
+            }
+        }
+
+        return field;
     }
 
     public static String getterName(String methodName, String namingStrategy) {
@@ -1718,11 +1645,13 @@ public abstract class BeanUtils {
         return null;
     }
 
-    public static Type getParamType(TypeReference type,
-                                    Class<?> raw,
-                                    Class declaringClass,
-                                    Parameter field,
-                                    Type fieldType) {
+    public static Type getParamType(
+            TypeReference type,
+            Class<?> raw,
+            Class declaringClass,
+            Parameter field,
+            Type fieldType
+    ) {
         while (raw != Object.class) {
             if (declaringClass == raw) {
                 return resolve(type.getType(), declaringClass, fieldType);
@@ -2411,7 +2340,7 @@ public abstract class BeanUtils {
             String name = m.getName();
             try {
                 Object result = m.invoke(annotation);
-                if (name.equals("value")) {
+                if ("value".equals(name)) {
                     fieldInfo.ignore = (boolean) (Boolean) result;
                 }
             } catch (Throwable ignored) {
@@ -2700,7 +2629,7 @@ public abstract class BeanUtils {
                     }
                     case "shape": {
                         String shape = ((Enum) result).name();
-                        if (shape.equals("STRING")) {
+                        if ("STRING".equals(shape)) {
                             fieldInfo.features |= JSONWriter.Feature.WriteNonStringValueAsString.mask;
                         }
                         break;
@@ -2720,7 +2649,7 @@ public abstract class BeanUtils {
             String name = m.getName();
             try {
                 Object result = m.invoke(annotation);
-                if (name.equals("pattern")) {
+                if ("pattern".equals(name)) {
                     String pattern = (String) result;
                     if (pattern.length() != 0) {
                         beanInfo.format = pattern;
@@ -2738,7 +2667,7 @@ public abstract class BeanUtils {
             String name = m.getName();
             try {
                 Object result = m.invoke(annotation);
-                if (name.equals("value")) {
+                if ("value".equals(name)) {
                     String include = ((Enum) result).name();
                     switch (include) {
                         case "ALWAYS":
@@ -2763,7 +2692,7 @@ public abstract class BeanUtils {
             String name = m.getName();
             try {
                 Object result = m.invoke(annotation);
-                if (name.equals("value")) {
+                if ("value".equals(name)) {
                     String value = (String) result;
                     if (!value.isEmpty()) {
                         beanInfo.typeName = value;
@@ -2857,7 +2786,7 @@ public abstract class BeanUtils {
             if (Modifier.isStatic(modifiers)
                     || Modifier.isTransient(modifiers)
                     || field.getDeclaringClass().isAssignableFrom(superclass)
-                    || field.getName().equals("this$0")
+                    || "this$0".equals(field.getName())
             ) {
                 return;
             }

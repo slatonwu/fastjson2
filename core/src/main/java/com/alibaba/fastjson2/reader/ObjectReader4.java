@@ -4,7 +4,6 @@ import com.alibaba.fastjson2.JSONB;
 import com.alibaba.fastjson2.JSONException;
 import com.alibaba.fastjson2.JSONReader;
 import com.alibaba.fastjson2.schema.JSONSchema;
-import com.alibaba.fastjson2.util.UnsafeUtils;
 
 import java.lang.reflect.Type;
 import java.util.function.Function;
@@ -12,7 +11,7 @@ import java.util.function.Supplier;
 
 import static com.alibaba.fastjson2.JSONB.Constants.BC_OBJECT;
 import static com.alibaba.fastjson2.JSONB.Constants.BC_OBJECT_END;
-import static com.alibaba.fastjson2.util.JDKUtils.UNSAFE_SUPPORT;
+import static com.alibaba.fastjson2.util.JDKUtils.UNSAFE;
 
 public class ObjectReader4<T>
         extends ObjectReaderAdapter<T> {
@@ -159,9 +158,9 @@ public class ObjectReader4<T>
         T object;
         if (creator != null) {
             object = creator.get();
-        } else if (UNSAFE_SUPPORT && ((features | jsonReader.getContext().getFeatures()) & JSONReader.Feature.FieldBased.mask) != 0) {
+        } else if (((features | jsonReader.getContext().getFeatures()) & JSONReader.Feature.FieldBased.mask) != 0) {
             try {
-                object = (T) UnsafeUtils.UNSAFE.allocateInstance(objectClass);
+                object = (T) UNSAFE.allocateInstance(objectClass);
             } catch (InstantiationException e) {
                 throw new JSONException(jsonReader.info("create instance error"), e);
             }
@@ -225,8 +224,8 @@ public class ObjectReader4<T>
             jsonReader.errorOnNoneSerializable(objectClass);
         }
 
-        ObjectReader autoTypeReader = checkAutoType(jsonReader, this.objectClass, this.features | features);
-        if (autoTypeReader != null && autoTypeReader != this && autoTypeReader.getObjectClass() != this.objectClass) {
+        ObjectReader autoTypeReader = checkAutoType(jsonReader, features);
+        if (autoTypeReader != null) {
             return (T) autoTypeReader.readArrayMappingJSONBObject(jsonReader, fieldType, fieldName, features);
         }
 
@@ -263,7 +262,7 @@ public class ObjectReader4<T>
             jsonReader.errorOnNoneSerializable(objectClass);
         }
 
-        if (jsonReader.isJSONB()) {
+        if (jsonReader.jsonb) {
             return readJSONBObject(jsonReader, fieldType, fieldName, features);
         }
 
